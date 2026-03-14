@@ -1,23 +1,9 @@
-<div align="center">
-
-[![Example](https://raw.githubusercontent.com/Tviskaron/pogema-svg/main/learn-to-follow-ep00001-lab-maze_010-seed0.svg)](https://github.com/AIRI-Institute/learn-to-follow) 
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1CnC47qbc4Z3sHfiR6sIX0ngXi6UfTx8o?usp=sharing)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/AIRI-Institute/learn-to-follow/blob/main/LICENSE)
-[![arXiv](https://img.shields.io/badge/arXiv-2310.01207-b31b1b.svg)](https://arxiv.org/abs/2310.01207)
-[![Paper](https://img.shields.io/badge/AAAI-2024-blue)](https://ojs.aaai.org/index.php/AAAI/article/view/29704)
-
-**Learn to Follow: Lifelong Multi-agent Pathfinding with Decentralized Replanning**
-
-</div> 
-
-This study addresses the challenging problem of decentralized lifelong multi-agent pathfinding. The proposed **Follower** 
-approach utilizes a combination of a planning algorithm for constructing a long-term plan and reinforcement learning
-for resolving local conflicts.
-
-**Paper:** [Learn to Follow: Decentralized Lifelong Multi-agent Pathfinding via Planning and Learning
-](https://arxiv.org/abs/2310.01207)
-
+## mapf_training_framework
+This repository contains training code for pogema-charge environment and adapt for algorithms include
+- **charger-appo**(based on **Follower**) in **Sample Factory**
+- **charger-iql** in **PyMarl**
+- **charger-qmix** in **PyMarl**
+- **charger-mappo** in **RLlib** through **PettingZoo**
 
 
 ## Installation:
@@ -26,46 +12,19 @@ for resolving local conflicts.
 pip3 install -r docker/requirements.txt
 ```
 
-
-Installation of ONNX runtime:
-```bash
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.14.1/onnxruntime-linux-x64-1.14.1.tgz \
-    && tar -xf onnxruntime-linux-x64-1.14.1.tgz \
-    && cp onnxruntime-linux-x64-1.14.1/lib/* /usr/lib/ && cp onnxruntime-linux-x64-1.14.1/include/* /usr/include/
-```
-
-Optionally, you could use the Dockerfile to build the image:
-```bash
-cd docker && sh build.sh
-```
-
 ## Inference Example:
 
-To execute the **Follower** algorithm and produce an animation using pre-trained weights, use the following command:
-
+To execute the algorithm and produce an animation using pre-trained weights, use the following command:
 ```bash
 python3 example.py
 ```
-
-The animation will be stored in the `renders` folder.
-
-It's recommended to set environment variable to restrict Numpy CPU threads to 1,  avoiding performance issues:
-
 ```bash
-export OMP_NUM_THREADS="1" 
-export MKL_NUM_THREADS="1" 
-export OPENBLAS_NUM_THREADS="1"
-```
-
-You can adjust the environment and algorithm parameter using arguments. For example:
-```
 python3 example.py --map_name wfi_warehouse --num_agents 128
-python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm FollowerLite
+python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-appo
+python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-iql
+python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-mappo
+python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-qmix
 ```
-
-
-We offer a Google Colab example that simplifies the process:
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/drive/1CnC47qbc4Z3sHfiR6sIX0ngXi6UfTx8o?usp=sharing)
 
 
 ## Training:
@@ -83,11 +42,7 @@ python3 main.py  --actor_critic_share_weights=True --batch_size=16384 --env=Poge
 The parameters are set to the values used in the paper.
 
 ### Testing and Results Visualization 
-To reproduce the main results of **Follower** and **FollowerLite** using [pogema-toolbox](https://github.com/AIRI-Institute/pogema-toolbox), use the following command:
-```bash
-python3 eval.py
-```
-This script will run all the experiments, the configurations for which are placed in the experiments folder. The raw data will be saved in the corresponding folders (including plots) and optionally saved to wandb.
+To eval the main results using [pogema-charge-benchmark](https://github.com/Jiaxi-Huang-Organization/pogema-charge-benchmark)
 
 #### Example Configuration:
 
