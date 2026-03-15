@@ -3,11 +3,11 @@ from sample_factory.utils.typing import Env
 from sample_factory.envs.env_utils import register_env
 
 from env.create_env import create_env_base
-from charger_appo.training_config import Experiment
+from charger_mappo.training_config import Experiment
 
 import gymnasium
-from charger_appo.training_config import Environment
-from charger_appo.preprocessing import PreprocessorConfig, wrap_preprocessors
+from charger_mappo.training_config import Environment
+from charger_mappo.preprocessing import PreprocessorConfig, wrap_preprocessors
 
 
 def create_env(environment_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
@@ -22,7 +22,7 @@ class MultiEnv(gymnasium.Wrapper):
             self.envs = [create_env(env_cfg, preprocessing_cfg)]
         else:
             assert env_cfg.target_num_agents % env_cfg.grid_config.num_agents == 0, \
-                "Target num charger_appo must be divisible by num agents"
+                "Target num charger_mappo must be divisible by num agents"
             num_envs = env_cfg.target_num_agents // env_cfg.grid_config.num_agents
             self.envs = [create_env(env_cfg, preprocessing_cfg) for _ in range(num_envs)]
 

@@ -9,12 +9,12 @@ from sample_factory.algo.utils.misc import ExperimentStatus
 
 import wandb
 
-from charger_appo.training_config import Experiment
+from charger_mappo.training_config import Experiment
 
 from sample_factory.utils.utils import log
 
-from charger_appo.register_env import register_custom_components
-from charger_appo.register_training_utils import register_custom_model, register_msg_handlers
+from charger_mappo.register_env import register_custom_components
+from charger_mappo.register_training_utils import register_custom_model, register_msg_handlers
 
 
 def create_sf_config(exp: Experiment):
@@ -71,12 +71,15 @@ def run(config=None):
         if params.wandb_thread_mode:
             os.environ["WANDB_START_METHOD"] = "thread"
         wandb.init(project='Charger', config=exp.dict(), save_code=False, sync_tensorboard=True,
-                   anonymous="allow", job_type=exp.environment.env, group='appo')
+                   anonymous="allow", job_type=exp.environment.env, group='mappo')
 
     flat_config, runner = make_runner(create_sf_config(exp))
     register_msg_handlers(flat_config, runner)
     status = runner.init()
     if status == ExperimentStatus.SUCCESS:
         status = runner.run()
+
+    if exp.use_wandb:
+        wandb.finish()
 
     return status

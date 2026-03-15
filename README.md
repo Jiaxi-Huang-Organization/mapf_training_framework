@@ -1,8 +1,6 @@
 ## mapf_training_framework
 This repository contains training code for pogema-charge environment and adapt for algorithms include
 - **charger-appo**(based on **Follower**) in **Sample Factory**
-- **charger-iql** in **PyMarl**
-- **charger-qmix** in **PyMarl**
 - **charger-mappo** in **RLlib** through **PettingZoo**
 
 

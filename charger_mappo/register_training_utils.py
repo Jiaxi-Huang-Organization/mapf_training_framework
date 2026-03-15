@@ -1,10 +1,10 @@
-from charger_appo.model import ResnetEncoder
+from charger_mappo.model import ActorEncoder, CriticEncoder, EncoderConfig
 
 from sample_factory.algo.utils.context import global_model_factory
-from sample_factory.utils.typing import ObsSpace
+from sample_factory.utils.typing import ObsSpace, Config
 from sample_factory.model.encoder import Encoder
 from tensorboardX import SummaryWriter
-from sample_factory.utils.typing import Config, PolicyID
+from sample_factory.utils.typing import PolicyID
 from sample_factory.algo.runners.runner import AlgoObserver, Runner
 
 import numpy as np
@@ -38,9 +38,29 @@ def register_msg_handlers(cfg: Config, runner: Runner):
 
 
 def make_custom_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
-    """Factory function as required by the API."""
-    return ResnetEncoder(cfg, obs_space)
+    """
+    Factory function for MAPPO encoder.
+    
+    This encoder handles both:
+    - Actor: uses 'obs' key (local observations)
+    - Critic: uses 'global_state' key (centralized training)
+    
+    The encoder automatically routes to the appropriate sub-encoder based on
+    the context (actor vs critic) determined by SampleFactory.
+    """
+    return ActorEncoder(cfg, obs_space)
 
 
 def register_custom_model():
+    """
+    Register custom MAPPO encoder.
+    
+    MAPPO CTDE is implemented through:
+    1. GlobalStateWrapper adds 'global_state' to observations
+    2. ActorEncoder processes 'obs' for actor
+    3. CriticEncoder processes 'global_state' for critic
+    
+    SampleFactory's ActorCritic will use the same encoder class, but
+    the encoder's forward method receives different keys for actor vs critic.
+    """
     global_model_factory().register_encoder_factory(make_custom_encoder)

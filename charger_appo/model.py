@@ -136,7 +136,7 @@ class ResnetEncoder(Encoder):
 def main():
     exp_cfg = {'encoder': EncoderConfig().dict()}
     r = 5
-    obs = torch.rand(1, 3, r * 2 + 1, r * 2 + 1)
+    obs = torch.rand(1, 5, r * 2 + 1, r * 2 + 1)  # 5 channels: obstacles, agents, charges, target, battery
     q_obs = {'obs': obs}
     # noinspection PyTypeChecker
     re = ResnetEncoder(Namespace(**exp_cfg), dict(obs=obs[0]))

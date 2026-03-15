@@ -1,7 +1,7 @@
 from typing import Optional, Union
 
-from charger_appo.model import EncoderConfig
-from charger_appo.preprocessing import PreprocessorConfig
+from charger_mappo.model import EncoderConfig
+from charger_mappo.preprocessing import PreprocessorConfig
 
 try:
     from typing import Literal
@@ -69,7 +69,7 @@ class Experiment(BaseModel):
 
     force_envs_single_thread: bool = True
     optimizer: Literal["adam", "lamb"] = 'adam'
-    restart_behavior: str = "overwrite"  # ["resume", "restart", "overwrite"]
+    restart_behavior: str = "overwrite"
     normalize_returns: bool = False
     async_rl: bool = False
     num_batches_per_epoch: int = 16
@@ -91,8 +91,12 @@ class Experiment(BaseModel):
     lr_schedule: str = 'kl_adaptive_minibatch'
 
     experiment: str = 'exp'
-    train_dir: str = 'experiments/train_dir/charger_appo'
+    train_dir: str = 'experiments/train_dir/charger_mappo'
     seed: Optional[int] = 42
     use_wandb: bool = True
     device: str = 'cpu'
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+    
+    # MAPPO specific: critic uses global state
+    use_global_critic: bool = True
+    global_critic_layers: list = [256, 128]

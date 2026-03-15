@@ -6,6 +6,6 @@ from pydantic import BaseModel
 class AlgoBase(BaseModel):
     name: str = None
     num_process: int = 5
-    device: str = 'cuda'
+    device: str = 'cpu'
     seed: Optional[int] = 0
     preprocessing: Optional[str] = None

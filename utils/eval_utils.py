@@ -12,10 +12,15 @@ def run_episode(env, algo):
     algo.reset_states()
     results_holder = ResultsHolder()
     obs, _ = env.reset(seed=env.grid_config.seed)
+    step_count = 0
     while True:
         obs, rew, dones, tr, infos = env.step(algo.act(obs))
         results_holder.after_step(infos)
 
+        # 添加监控代码
+        step_count += 1
+        dead_count = sum(1 for info in infos if not info.get('is_active', True))
+        print(f"Step {step_count}: Dead agents = {dead_count}/{len(infos)}")
         if all(dones) or all(tr):
             break
     return results_holder.get_final()

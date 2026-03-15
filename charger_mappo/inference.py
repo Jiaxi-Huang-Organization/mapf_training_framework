@@ -1,14 +1,14 @@
 from pogema_toolbox.algorithm_config import AlgoBase
 
-from charger_appo.preprocessing import PreprocessorConfig
+from charger_mappo.preprocessing import PreprocessorConfig
 # noinspection PyUnresolvedReferences
 from utils import fix_num_threads_issue
 
 import json
 from copy import deepcopy
 
-from charger_appo.training_config import Experiment
-from charger_appo.register_env import register_custom_components
+from charger_mappo.training_config import Experiment
+from charger_mappo.register_env import register_custom_components
 
 import os
 from argparse import Namespace
@@ -35,29 +35,31 @@ from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
 
-# from charger_appo.algorithm_utils import AlgoBase
-
-from charger_appo.register_training_utils import register_custom_model
+from charger_mappo.register_training_utils import register_custom_model
 
 
-class chargerAppoInferenceConfig(AlgoBase, extra=Extra.forbid):
+class chargerMappoInferenceConfig(AlgoBase, extra=Extra.forbid):
     """
-    A configuration class for the Proximal Policy Optimization (PPO) algorithm,
-    with additional parameters specific to the charger_appo agent.
+    Configuration class for charger_mappo inference.
 
     Attributes:
     -----------
-    name : Literal['charger_appo']
-        A string literal specifying the name of the agent.
+    name : Literal['charger_mappo']
+        Name of the agent.
     path_to_weights : str
-        A string specifying the path to the weights file used by the agent.
-    planner_cfg : dict
-    batched : bool
-        A boolean indicating whether the agent should use a batched approach during training.
+        Path to the weights file.
+    preprocessing: PreprocessorConfig
+        Preprocessing configuration.
+    override_config: Optional[dict]
+        Override configuration for the model.
+    training_config: Optional[Experiment]
+        Training configuration.
+    custom_path_to_weights: Optional[str]
+        Custom path to weights file.
     """
-    name: Literal['charger_appo'] = 'charger_appo'
+    name: Literal['charger_mappo'] = 'charger_mappo'
 
-    path_to_weights: str = "model/charger_appo"
+    path_to_weights: str = "model/charger_mappo"
     preprocessing: PreprocessorConfig = PreprocessorConfig()
     override_config: Optional[dict] = None
     training_config: Optional[Experiment] = None
@@ -82,14 +84,16 @@ class chargerAppoInferenceConfig(AlgoBase, extra=Extra.forbid):
         return field_value
 
 
-class chargerAppoInference:
+class chargerMappoInference:
     """
-    Inference class for charger_appo algorithm.
+    Inference class for charger_mappo algorithm.
+    
+    Note: During inference, only local observations are used (decentralized execution).
     """
 
     def __init__(self, config):
 
-        self.algo_cfg: chargerAppoInferenceConfig = config
+        self.algo_cfg: chargerMappoInferenceConfig = config
         device = config.device
 
         register_custom_model()
@@ -169,7 +173,6 @@ class chargerAppoInference:
                 if not isinstance(observations[0][key], str):
                     obs_dict[key] = [o[key] for o in observations]
         else:
-            # handle flat observations also as dict
             obs_dict['obs'] = observations
 
         for key, x in obs_dict.items():
@@ -177,12 +180,12 @@ class chargerAppoInference:
 
         return obs_dict
 
-    def to_onnx(self, filename='charger_appo.onnx'):
+    def to_onnx(self, filename='charger_mappo.onnx'):
         self.net.eval()
         r = self.algo_cfg.training_config.preprocessing.network_input_radius
         log.info(f"Saving model with network_input_radius = {r}")
         d = 2 * r + 1
-        obs_example = torch.rand(1, 2, d, d, device=self.device)
+        obs_example = torch.rand(1, 5, d, d, device=self.device)
         rnn_example = torch.rand(1, 1, device=self.device)
         with torch.no_grad():
             q = self.net({'obs': obs_example}, rnn_example)
