@@ -1,3 +1,10 @@
+"""
+Charger APPO Preprocessing
+
+Key modification from follower:
+- When battery < charge_threshold, planner targets nearest charger instead of goal
+- This creates smooth transition between goal-seeking and charging behavior
+"""
 import numpy as np
 import gymnasium
 from gymnasium import ObservationWrapper
@@ -7,18 +14,39 @@ from charger_appo.planning import ResettablePlanner, PlannerConfig
 
 
 class PreprocessorConfig(PlannerConfig):
+    """
+    Configuration for charger appo preprocessing.
+    
+    Args:
+        network_input_radius: Radius for observation cropping
+        intrinsic_target_reward: Reward for achieving subgoals
+        charge_threshold: Battery threshold below which agent seeks charger (0.0-1.0)
+        charger_intrinsic_reward: Reward for charger subgoals (can be different from target reward)
+    """
     network_input_radius: int = 5
     intrinsic_target_reward: float = 0.01
-    # battery_scale will be set from initial battery value during reset
+    charge_threshold: float = 0.3  # When battery < 30%, seek charger
+    charger_intrinsic_reward: float = 0.01  # Can be higher to prioritize charging
 
 
 def charger_appo_preprocessor(env, algo_config):
-    env = wrap_preprocessors(env, algo_config.training_config.preprocessing)
+    """Wrap environment with charger appo preprocessing."""
+    # Handle both training config and inference config
+    if hasattr(algo_config, 'training_config') and algo_config.training_config is not None:
+        config = algo_config.training_config.preprocessing
+    elif hasattr(algo_config, 'preprocessing'):
+        config = algo_config.preprocessing
+    else:
+        # Use default config
+        config = PreprocessorConfig()
+    
+    env = wrap_preprocessors(env, config=config, auto_reset=False)
     return env
 
 
 def wrap_preprocessors(env, config: PreprocessorConfig, auto_reset=False):
-    env = charger_appoWrapper(env=env, config=config)
+    """Apply all preprocessing wrappers."""
+    env = ChargerWrapper(env=env, config=config)
     env = CutObservationWrapper(env, target_observation_radius=config.network_input_radius)
     env = ConcatPositionalFeatures(env)
     if auto_reset:
@@ -26,7 +54,18 @@ def wrap_preprocessors(env, config: PreprocessorConfig, auto_reset=False):
     return env
 
 
-class charger_appoWrapper(ObservationWrapper):
+class ChargerWrapper(ObservationWrapper):
+    """
+    Main wrapper with battery-aware target switching.
+
+    When battery < charge_threshold:
+    - Planner targets nearest charger instead of goal
+    - Intrinsic reward uses charger_intrinsic_reward
+
+    When battery >= charge_threshold:
+    - Planner targets goal (same as follower)
+    - Intrinsic reward uses intrinsic_target_reward
+    """
 
     def __init__(self, env, config: PreprocessorConfig):
         super().__init__(env)
@@ -34,58 +73,152 @@ class charger_appoWrapper(ObservationWrapper):
         self.re_plan = ResettablePlanner(self._cfg)
         self.prev_goals = None
         self.intrinsic_reward = None
-        self.battery_scale = None  # Will be set from initial battery value
-        
-        # Update observation space to include all spatial channels
-        obs_space = self.observation_space
-        full_size = obs_space['obstacles'].shape[0]
-        obs_space['charges'] = Box(0.0, 1.0, shape=(full_size, full_size))
-        obs_space['target'] = Box(0.0, 1.0, shape=(full_size, full_size))
-        obs_space['battery'] = Box(0.0, 1.0, shape=(full_size, full_size))
+        self.battery_scale = None  # Will be set from initial battery
+        self.nearest_charger_xy = None  # Store nearest charger for each agent
 
     @staticmethod
     def get_relative_xy(x, y, tx, ty, obs_radius):
+        """Convert global coordinates to relative observation coordinates."""
         dx, dy = x - tx, y - ty
         if dx > obs_radius or dx < -obs_radius or dy > obs_radius or dy < -obs_radius:
             return None, None
         return obs_radius - dx, obs_radius - dy
 
+    def _find_nearest_charger(self, obs: dict) -> tuple:
+        """
+        Find the nearest charger from agent's current position.
+
+        Args:
+            obs: Agent observation dictionary
+
+        Returns:
+            (cx, cy) of nearest charger, or None if no charger found
+        """
+        charges_xy = obs.get('charges_xy', [])
+        if not charges_xy:
+            return None
+
+        # Find nearest charger by Manhattan distance
+        agent_x, agent_y = obs['xy']
+        min_dist = float('inf')
+        nearest_charger = None
+
+        for cx, cy in charges_xy:
+            dist = abs(agent_x - cx) + abs(agent_y - cy)
+            if dist < min_dist:
+                min_dist = dist
+                nearest_charger = (cx, cy)
+
+        return nearest_charger
+
+    def _get_battery_level(self, obs: dict) -> float:
+        """
+        Get normalized battery level (0.0 - 1.0).
+        
+        Args:
+            obs: Agent observation dictionary
+            
+        Returns:
+            Normalized battery level
+        """
+        battery = obs.get('battery', self.battery_scale)
+        if isinstance(battery, (int, float)):
+            battery_val = battery
+        elif hasattr(battery, '__len__') and len(battery) > 0:
+            battery_val = battery[0]
+        else:
+            battery_val = self.battery_scale
+        
+        return battery_val / self.battery_scale if self.battery_scale else 1.0
+
+    def _determine_target(self, obs: dict) -> tuple:
+        """
+        Determine planning target based on battery level.
+
+        Args:
+            obs: Agent observation dictionary
+
+        Returns:
+            (target_x, target_y, is_charger_target, nearest_charger)
+        """
+        battery_level = self._get_battery_level(obs)
+        nearest_charger = self._find_nearest_charger(obs)
+
+        if battery_level < self._cfg.charge_threshold and nearest_charger is not None:
+            # Battery low: target nearest charger
+            return nearest_charger[0], nearest_charger[1], True, nearest_charger
+
+        # Battery OK or no charger found: target goal
+        return obs['target_xy'][0], obs['target_xy'][1], False, nearest_charger
+
     def observation(self, observations):
         # Set battery_scale from initial battery value if not set
         if self.battery_scale is None and len(observations) > 0:
-            # Use the first agent's initial battery as the scale
             initial_battery = observations[0].get('battery', 100)
-            self.battery_scale = initial_battery if isinstance(initial_battery, (int, float)) else initial_battery[0] if hasattr(initial_battery, '__len__') else 100
-        
-        # Update cost penalties based on the current observations, independently for each agent.
-        self.re_plan.update(observations)
+            if isinstance(initial_battery, (int, float)):
+                self.battery_scale = initial_battery
+            elif hasattr(initial_battery, '__len__') and len(initial_battery) > 0:
+                self.battery_scale = initial_battery[0]
+            else:
+                self.battery_scale = 100
 
-        # Retrieve the shortest path to the global target for each agent.
+        # Determine targets and nearest chargers for each agent
+        targets = []
+        target_is_charger = []
+        nearest_chargers = []
+        for obs in observations:
+            tx, ty, is_charger, nearest_charger = self._determine_target(obs)
+            targets.append((tx, ty))
+            target_is_charger.append(is_charger)
+            nearest_chargers.append(nearest_charger if nearest_charger else (0, 0))
+        
+        # Store nearest charger info for ConcatPositionalFeatures
+        self.nearest_charger_xy = nearest_chargers
+
+        # Temporarily modify observations for planner
+        # Planner uses target_xy to compute paths
+        original_targets = [obs['target_xy'] for obs in observations]
+        for k, obs in enumerate(observations):
+            obs['target_xy'] = targets[k]
+
+        # Update cost penalties and compute paths
+        self.re_plan.update(observations)
         paths = self.re_plan.get_path()
 
-        new_goals = []  # Initialize a list to store new goals for each agent.
-        intrinsic_rewards = [0.0] * len(observations)  # Initialize with zeros for all agents
-
-        # Iterate through agents and their respective paths.
+        # Restore original targets (for observation consistency)
         for k, obs in enumerate(observations):
-            path = paths[k] if k < len(paths) else None
+            obs['target_xy'] = original_targets[k]
 
-            # Check if there is no valid path available.
-            if path is None:
-                new_goals.append(obs['target_xy'])  # Use the target position as a new goal.
+        new_goals = []
+        intrinsic_rewards = []
+
+        # Process each agent
+        for k, path in enumerate(paths):
+            obs = observations[k]
+            is_charger_target = target_is_charger[k]
+
+            if path is None or len(path) < 2:
+                # No valid path: use current target as goal
+                new_goals.append(targets[k])
+                intrinsic_rewards.append(0.0)
                 path = []
             else:
-                # Check if the agent reached their subgoal from its previous step
+                # Check if agent reached subgoal
                 subgoal_achieved = self.prev_goals and obs['xy'] == self.prev_goals[k]
-                # Assign an intrinsic reward if conditions are met, otherwise set it to 0.
-                intrinsic_rewards[k] = self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
-                # Select a new target point.
+
+                # Select reward based on target type
+                if is_charger_target:
+                    reward_val = self._cfg.charger_intrinsic_reward if subgoal_achieved else 0.0
+                else:
+                    reward_val = self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
+
+                intrinsic_rewards.append(reward_val)
                 new_goals.append(path[1])
 
-            # Set obstacle values to -1.0 in the observation.
+            # Preprocess obstacles: set obstacle values to -1.0
             obs['obstacles'][obs['obstacles'] > 0] *= -1
 
-            # Adding path to the observation, setting path values to +1.0.
+            # Add path to observation (+1.0 for path cells)
             r = obs['obstacles'].shape[0] // 2
             for idx, (gx, gy) in enumerate(path):
                 x, y = self.get_relative_xy(*obs['xy'], gx, gy, r)
@@ -93,50 +226,44 @@ class charger_appoWrapper(ObservationWrapper):
                     obs['obstacles'][x, y] = 1.0
                 else:
                     break
-            
-            # Add charger positions to a new channel (always add, regardless of path)
-            obs['charges'] = np.zeros_like(obs['obstacles'])
-            for cx, cy in obs.get('charges_xy', []):
-                x, y = self.get_relative_xy(*obs['xy'], cx, cy, r)
-                if x is not None and y is not None:
-                    obs['charges'][x, y] = 1.0
-            
-            # Add target position to a new channel
-            obs['target'] = np.zeros_like(obs['obstacles'])
-            tx, ty = obs['target_xy']
-            x, y = self.get_relative_xy(*obs['xy'], tx, ty, r)
-            if x is not None and y is not None:
-                obs['target'][x, y] = 1.0
-            
-            # Add battery level as a channel (filled with normalized battery value)
-            battery = obs.get('battery', self.battery_scale)
-            battery_val = battery if isinstance(battery, (int, float)) else battery[0] if hasattr(battery, '__len__') else self.battery_scale
-            obs['battery'] = np.full_like(obs['obstacles'], battery_val / self.battery_scale, dtype=np.float32)
-            
-            # print(obs['obstacles'])
-        # Update the previous goals and intrinsic rewards for the next step.
+
+        # Update state for next step
         self.prev_goals = new_goals
         self.intrinsic_reward = intrinsic_rewards
 
         return observations
 
     def get_intrinsic_rewards(self, reward):
-        for agent_idx, r in enumerate(reward):
+        """Replace environment rewards with intrinsic rewards."""
+        for agent_idx in range(len(reward)):
             reward[agent_idx] = self.intrinsic_reward[agent_idx]
         return reward
 
     def step(self, action):
         observation, reward, done, tr, info = self.env.step(action)
-        return self.observation(observation), self.get_intrinsic_rewards(reward), done, tr, info
+        return (
+            self.observation(observation), 
+            self.get_intrinsic_rewards(reward), 
+            done, 
+            tr, 
+            info
+        )
 
     def reset_state(self):
+        """Reset planner state."""
         self.re_plan.reset_states()
-        self.battery_scale = None  # Reset battery_scale for new episode
+        self.battery_scale = None
+        
         if hasattr(self, 'get_global_obstacles'):
-            self.re_plan._agent.add_grid_obstacles(self.get_global_obstacles(), self.get_global_agents_xy())
+            self.re_plan._agent.add_grid_obstacles(
+                self.get_global_obstacles(), 
+                self.get_global_agents_xy()
+            )
         else:
-            # Fallback: use local obstacles if global not available
             self.re_plan._agent.add_grid_obstacles(None, None)
+
+        self.prev_goals = None
+        self.intrinsic_reward = None
 
     def reset(self, **kwargs):
         observations, infos = self.env.reset(**kwargs)
@@ -145,6 +272,8 @@ class charger_appoWrapper(ObservationWrapper):
 
 
 class CutObservationWrapper(ObservationWrapper):
+    """Crop observations to target radius."""
+    
     def __init__(self, env, target_observation_radius):
         super().__init__(env)
         self._target_obs_radius = target_observation_radius
@@ -170,21 +299,38 @@ class CutObservationWrapper(ObservationWrapper):
 
 
 class ConcatPositionalFeatures(ObservationWrapper):
+    """
+    Concatenate spatial features and preserve scalar features.
+
+    Spatial features (concatenated into 'obs'):
+    - obstacles, agents, charges, battery
+
+    Scalar features (preserved as-is):
+    - xy: (2,) - agent position
+    - target_xy: (2,) - target position
+    - charge_xy: (2,) - nearest charger position (same as planner uses)
+    - battery: (1,) - scalar battery level
+
+    Note: charge_xy is set by ChargerWrapper to match the planner's target charger.
+    """
 
     def __init__(self, env):
         super().__init__(env)
         self.to_concat = []
-        self.scalar_features = []
 
         observation_space = Dict()
         full_size = self.env.observation_space['obstacles'].shape[0]
 
-        for key, value in self.observation_space.items():
+        for key, value in self.env.observation_space.items():
             if value.shape == (full_size, full_size):
                 self.to_concat.append(key)
             else:
-                self.scalar_features.append(key)
-                observation_space[key] = value
+                # Keep scalar features as-is, but convert charges_xy to charge_xy
+                if key == 'charges_xy':
+                    # Replace charges_xy (Box for list) with charge_xy (Box for single (2,))
+                    observation_space['charge_xy'] = Box(-1024, 1024, (2,), np.int64)
+                else:
+                    observation_space[key] = value
 
         obs_shape = (len(self.to_concat), full_size, full_size)
         observation_space['obs'] = Box(0.0, 1.0, shape=obs_shape)
@@ -199,11 +345,37 @@ class ConcatPositionalFeatures(ObservationWrapper):
 
             for key in obs:
                 obs[key] = np.array(obs[key], dtype=np.float32)
+            
+            # Set charge_xy from ChargerWrapper's stored nearest_charger_xy
+            if hasattr(self.env, 'nearest_charger_xy') and self.env.nearest_charger_xy is not None:
+                charger = self.env.nearest_charger_xy[agent_idx]
+                obs['charge_xy'] = np.array(charger, dtype=np.float32)
+            else:
+                # Fallback: find nearest charger ourselves
+                charges_xy = obs.get('charges_xy', [])
+                if charges_xy:
+                    agent_x, agent_y = obs['xy']
+                    min_dist = float('inf')
+                    nearest = (0, 0)
+                    for cx, cy in charges_xy:
+                        dist = abs(agent_x - cx) + abs(agent_y - cy)
+                        if dist < min_dist:
+                            min_dist = dist
+                            nearest = (cx, cy)
+                    obs['charge_xy'] = np.array(nearest, dtype=np.float32)
+                else:
+                    obs['charge_xy'] = np.array([0, 0], dtype=np.float32)
+            
+            # Remove charges_xy after converting to charge_xy
+            if 'charges_xy' in obs:
+                del obs['charges_xy']
+            
             observations[agent_idx]['obs'] = main_obs.astype(np.float32)
         return observations
 
     @staticmethod
     def key_comparator(x):
+        """Sort channels in consistent order."""
         if x == 'obstacles':
             return '0_' + x
         elif 'agents' in x:
@@ -218,6 +390,8 @@ class ConcatPositionalFeatures(ObservationWrapper):
 
 
 class AutoResetWrapper(gymnasium.Wrapper):
+    """Automatically reset environment when all agents are done."""
+    
     def step(self, action):
         observations, rewards, terminated, truncated, infos = self.env.step(action)
         if all(terminated) or all(truncated):

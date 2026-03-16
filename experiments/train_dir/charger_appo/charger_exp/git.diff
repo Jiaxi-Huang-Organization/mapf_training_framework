@@ -1,0 +1,3858 @@
+diff --git a/charger_appo/inference.py b/charger_appo/inference.py
+index 79fdf5d..8e95115 100644
+--- a/charger_appo/inference.py
++++ b/charger_appo/inference.py
+@@ -1,195 +1,210 @@
+-from pogema_toolbox.algorithm_config import AlgoBase
++"""
++Charger APPO Inference
+ 
+-from charger_appo.preprocessing import PreprocessorConfig
+-# noinspection PyUnresolvedReferences
+-from utils import fix_num_threads_issue
+-
+-import json
+-from copy import deepcopy
+-
+-from charger_appo.training_config import Experiment
+-from charger_appo.register_env import register_custom_components
+-
+-import os
++Inference utilities for the charger policy.
++Follows the same pattern as follower inference for consistency.
++"""
++from typing import Optional, List
+ from argparse import Namespace
+-from collections import OrderedDict
+ from os.path import join
++import os
++import json
+ 
++import torch
+ import numpy as np
+ 
+-from typing import Optional
+-
+-try:
+-    from typing import Literal
+-except ImportError:
+-    from typing_extensions import Literal
+-
+-import torch
+ from sample_factory.utils.utils import log
+-from pydantic import Extra, validator
+-
+ from sample_factory.algo.learning.learner import Learner
+ from sample_factory.model.actor_critic import create_actor_critic
+-from sample_factory.model.model_utils import get_rnn_size
+ from sample_factory.algo.utils.make_env import make_env_func_batched
+ from sample_factory.utils.attr_dict import AttrDict
+ from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
++from sample_factory.model.model_utils import get_rnn_size
+ 
+-# from charger_appo.algorithm_utils import AlgoBase
+-
++from charger_appo.register_env import register_custom_components
+ from charger_appo.register_training_utils import register_custom_model
++from charger_appo.training_config import Experiment
+ 
+ 
+-class chargerAppoInferenceConfig(AlgoBase, extra=Extra.forbid):
+-    """
+-    A configuration class for the Proximal Policy Optimization (PPO) algorithm,
+-    with additional parameters specific to the charger_appo agent.
+-
+-    Attributes:
+-    -----------
+-    name : Literal['charger_appo']
+-        A string literal specifying the name of the agent.
+-    path_to_weights : str
+-        A string specifying the path to the weights file used by the agent.
+-    planner_cfg : dict
+-    batched : bool
+-        A boolean indicating whether the agent should use a batched approach during training.
+-    """
+-    name: Literal['charger_appo'] = 'charger_appo'
+-
+-    path_to_weights: str = "model/charger_appo"
+-    preprocessing: PreprocessorConfig = PreprocessorConfig()
+-    override_config: Optional[dict] = None
+-    training_config: Optional[Experiment] = None
+-    custom_path_to_weights: Optional[str] = None
+-
+-    @classmethod
+-    def recursive_dict_update(cls, original_dict, update_dict):
+-        for key, value in update_dict.items():
+-            if key in original_dict and isinstance(original_dict[key], dict) and isinstance(value, dict):
+-                cls.recursive_dict_update(original_dict[key], value)
+-            else:
+-                if key not in original_dict:
+-                    raise ValueError(f"Key '{key}' does not exist in the original training config.")
+-                original_dict[key] = value
+-
+-    @validator('training_config', always=True, pre=True)
+-    def load_training_config(cls, _, values, ):
+-        with open(join(values['path_to_weights'], 'config.json'), "r") as f:
+-            field_value = json.load(f)
+-        if values.get('override_config') is not None:
+-            cls.recursive_dict_update(field_value, deepcopy(values['override_config']))
+-        return field_value
++class ChargerAppoInferenceConfig:
++    """Configuration for charger appo inference."""
++    
++    def __init__(
++        self,
++        path_to_weights: str = 'model/charger_appo',
++        device: str = 'cpu',
++        override_config: Optional[dict] = None,
++        custom_path_to_weights: Optional[str] = None,
++    ):
++        self.path_to_weights = path_to_weights
++        self.device = device
++        self.override_config = override_config
++        self.custom_path_to_weights = custom_path_to_weights
++        self.training_config = None
+ 
+ 
+-class chargerAppoInference:
++class ChargerAppoInference:
+     """
+-    Inference class for charger_appo algorithm.
++    Charger APPO inference engine.
++    
++    Loads trained charger policy and provides act() interface
++    for getting actions from observations.
+     """
+-
+-    def __init__(self, config):
+-
+-        self.algo_cfg: chargerAppoInferenceConfig = config
+-        device = config.device
+-
++    
++    def __init__(self, cfg: ChargerAppoInferenceConfig):
++        self.algo_cfg = cfg
++        self.device = torch.device(cfg.device)
++        
++        # Register custom components
++        register_custom_components('PogemaMazes-v0')
+         register_custom_model()
+-        self.path = config.path_to_weights
+-
+-        with open(join(self.path, 'config.json'), "r") as f:
++        
++        # Load model
++        self._load_model()
++    
++    def _load_model(self):
++        """Load the charger actor-critic model."""
++        path = self.algo_cfg.path_to_weights
++        
++        # Load config.json from checkpoint directory
++        config_path = join(path, 'config.json')
++        if not os.path.exists(config_path):
++            raise FileNotFoundError(f"config.json not found in {path}")
++        
++        with open(config_path, 'r') as f:
+             flat_config = json.load(f)
+-            self.exp = Experiment(**flat_config)
+-            flat_config = Namespace(**flat_config)
+-        env_name = self.exp.environment.env
+-        register_custom_components(env_name)
+-        config = flat_config
+-
+-        config.num_envs = 1
+-
+-        env = make_env_func_batched(config, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0))
+-        actor_critic = create_actor_critic(config, env.observation_space, env.action_space)
++        
++        # Apply override config if provided
++        if self.algo_cfg.override_config:
++            self._recursive_dict_update(flat_config, self.algo_cfg.override_config)
++        
++        self.exp = Experiment(**flat_config)
++        flat_config_ns = Namespace(**flat_config)
++        
++        # Set num_envs for inference
++        flat_config_ns.num_envs = 1
++        
++        # Create environment to get observation/action spaces
++        env = make_env_func_batched(
++            flat_config_ns, 
++            env_config=AttrDict(worker_index=0, vector_index=0, env_id=0)
++        )
++        
++        # Create actor-critic using sample_factory factory
++        actor_critic = create_actor_critic(
++            flat_config_ns, 
++            env.observation_space, 
++            env.action_space
++        )
+         actor_critic.eval()
+         env.close()
+-
+-        if device != 'cpu' and not torch.cuda.is_available():
+-            os.environ['OMP_NUM_THREADS'] = str(1)
+-            os.environ['MKL_NUM_THREADS'] = str(1)
+-            device = torch.device('cpu')
++        
++        # Move to device
++        if self.algo_cfg.device != 'cpu' and not torch.cuda.is_available():
++            os.environ['OMP_NUM_THREADS'] = '1'
++            os.environ['MKL_NUM_THREADS'] = '1'
++            self.device = torch.device('cpu')
+             torch.set_num_threads(1)
+             torch.set_num_interop_threads(1)
+             log.warning('CUDA is not available, using CPU. This might be slow.')
+-
+-        actor_critic.model_to_device(device)
+-        name_prefix = dict(latest="checkpoint", best="best")['latest']
+-        policy_index = 0 if 'policy_index' not in flat_config else flat_config.policy_index
+-
+-        checkpoints = Learner.get_checkpoints(os.path.join(self.path, f"checkpoint_p{policy_index}"),
+-                                              f"{name_prefix}_*")
+-
++        
++        actor_critic.model_to_device(self.device)
++        
++        # Load checkpoint
++        name_prefix = 'checkpoint'
++        policy_index = 0 if 'policy_index' not in flat_config else flat_config['policy_index']
++        
++        checkpoints = Learner.get_checkpoints(
++            os.path.join(path, f"checkpoint_p{policy_index}"),
++            f"{name_prefix}_*"
++        )
++        
++        # Use custom checkpoint path if provided
+         if self.algo_cfg.custom_path_to_weights:
+             checkpoints = [self.algo_cfg.custom_path_to_weights]
+-
+-        checkpoint_dict = Learner.load_checkpoint(checkpoints, device)
++        
++        checkpoint_dict = Learner.load_checkpoint(checkpoints, self.device)
+         actor_critic.load_state_dict(checkpoint_dict['model'])
+         log.info(f'Loaded {str(checkpoints)}')
+-
++        
+         self.net = actor_critic
+-        self.device = device
+-        self.cfg = config
+-
++        self.cfg = flat_config_ns
+         self.rnn_states = None
+-
+-    def act(self, observations):
+-        self.rnn_states = torch.zeros([len(observations), get_rnn_size(self.cfg)], dtype=torch.float32,
+-                                      device=self.device) if self.rnn_states is None else self.rnn_states
+-
++    
++    @classmethod
++    def _recursive_dict_update(cls, original_dict: dict, update_dict: dict):
++        """Recursively update dictionary."""
++        for key, value in update_dict.items():
++            if key in original_dict and isinstance(original_dict[key], dict) and isinstance(value, dict):
++                cls._recursive_dict_update(original_dict[key], value)
++            else:
++                original_dict[key] = value
++    
++    def act(self, observations, deterministic: bool = True):
++        """
++        Get actions for observations.
++        
++        Args:
++            observations: List of observation dictionaries
++            deterministic: Whether to use deterministic actions
++            
++        Returns:
++            Array of actions
++        """
++        self.rnn_states = (
++            torch.zeros(
++                [len(observations), get_rnn_size(self.cfg)], 
++                dtype=torch.float32,
++                device=self.device
++            ) 
++            if self.rnn_states is None 
++            else self.rnn_states
++        )
++        
+         obs = AttrDict(self.transform_dict_observations(observations))
++        
+         with torch.no_grad():
+-            policy_outputs = self.net(prepare_and_normalize_obs(self.net, obs), self.rnn_states)
+-
++            policy_outputs = self.net(
++                prepare_and_normalize_obs(self.net, obs), 
++                self.rnn_states
++            )
++        
+         self.rnn_states = policy_outputs['new_rnn_states']
+-        return policy_outputs['actions'].cpu().numpy()
+-
++        
++        if deterministic:
++            actions = torch.argmax(policy_outputs['action_logits'], dim=-1)
++        else:
++            probs = torch.softmax(policy_outputs['action_logits'], dim=-1)
++            actions = torch.multinomial(probs, 1).squeeze(-1)
++        
++        return actions.cpu().numpy()
++    
+     def reset_states(self):
+-        torch.manual_seed(self.algo_cfg.seed)
++        """Reset RNN states and random seed."""
++        torch.manual_seed(getattr(self.algo_cfg, 'seed', 42))
+         self.rnn_states = None
+-
++    
+     @staticmethod
+     def count_parameters(model):
++        """Count trainable parameters."""
+         return sum(p.numel() for p in model.parameters() if p.requires_grad)
+-
++    
+     def get_model_parameters(self):
++        """Get number of trainable parameters."""
+         return self.count_parameters(self.net)
+-
++    
+     @staticmethod
+     def transform_dict_observations(observations):
+         """Transform list of dict observations into a dict of lists."""
+         obs_dict = dict()
+-        if isinstance(observations[0], (dict, OrderedDict)):
++        if isinstance(observations[0], (dict,)):
+             for key in observations[0].keys():
+                 if not isinstance(observations[0][key], str):
+                     obs_dict[key] = [o[key] for o in observations]
+         else:
+-            # handle flat observations also as dict
+             obs_dict['obs'] = observations
+ 
+         for key, x in obs_dict.items():
+             obs_dict[key] = np.stack(x)
+ 
+         return obs_dict
+-
+-    def to_onnx(self, filename='charger_appo.onnx'):
+-        self.net.eval()
+-        r = self.algo_cfg.training_config.preprocessing.network_input_radius
+-        log.info(f"Saving model with network_input_radius = {r}")
+-        d = 2 * r + 1
+-        obs_example = torch.rand(1, 2, d, d, device=self.device)
+-        rnn_example = torch.rand(1, 1, device=self.device)
+-        with torch.no_grad():
+-            q = self.net({'obs': obs_example}, rnn_example)
+-            print(q)
+-        input_names = ['obs', 'rnn_state']
+-        output_names = ['values', 'action_logits', 'log_prob_actions', 'actions', 'new_rnn_states']
+-
+-        torch.onnx.export(self.net, ({'obs': obs_example}, rnn_example), filename,
+-                          input_names=input_names, output_names=output_names,
+-                          export_params=True)
+diff --git a/charger_appo/model.py b/charger_appo/model.py
+index e25cb4f..9273778 100644
+--- a/charger_appo/model.py
++++ b/charger_appo/model.py
+@@ -1,48 +1,50 @@
++"""
++Charger APPO Model
++
++Key features:
++1. ResnetEncoder for spatial features (same as follower)
++2. Support for loading and freezing follower encoder weights
++3. Scalar features (xy, target_xy, battery, charge_xy) handled separately
++"""
+ from argparse import Namespace
+-from typing import Literal
++from typing import Literal, Tuple, List, Optional
++import os
++import glob
++import json
+ 
+ import torch
++import torch.nn as nn
+ from pydantic import BaseModel
+ from sample_factory.model.encoder import Encoder
+ from sample_factory.utils.typing import Config, ObsSpace
+ from sample_factory.algo.utils.torch_utils import calc_num_elements
+-
+ from sample_factory.utils.utils import log
+ 
+-from torch import nn as nn
+-
+ 
+ class EncoderConfig(BaseModel):
+     """
+-    Configuration for an encoder.
+-
++    Configuration for the ResNet encoder.
++    
+     Args:
+-        extra_fc_layers (int): Number of extra fully connected (fc) layers. Default is 0.
+-        num_filters (int): Number of filters. Default is 64.
+-        num_res_blocks (int): Number of residual blocks. Default is 1.
+-        activation_func (Literal['ReLU', 'ELU']): Activation function to use. Default is 'ReLU'.
+-        hidden_size (int): Hidden size for extra fc layers. Default is 128.
++        extra_fc_layers: Number of extra fully connected layers
++        num_filters: Number of convolutional filters
++        num_res_blocks: Number of residual blocks per stage
++        activation_func: Activation function ('ReLU', 'ELU', 'Mish')
++        hidden_size: Hidden size for extra FC layers
++        follower_checkpoint: Path to pre-trained follower checkpoint
++        freeze_follower_encoder: Whether to freeze follower encoder parameters
+     """
+     extra_fc_layers: int = 0
+     num_filters: int = 64
+     num_res_blocks: int = 1
+     activation_func: Literal['ReLU', 'ELU', 'Mish'] = 'ReLU'
+     hidden_size: int = 128
++    follower_checkpoint: Optional[str] = None
++    freeze_follower_encoder: bool = True
+ 
+ 
+ def activation_func(cfg: EncoderConfig) -> nn.Module:
+-    """
+-    Returns an instance of nn.Module representing the activation function specified in the configuration.
+-
+-    Args:
+-        cfg (EncoderConfig): Encoder configuration.
+-
+-    Returns:
+-        nn.Module: Instance of nn.Module representing the activation function.
+-
+-    Raises:
+-        Exception: If the activation function specified in the configuration is unknown.
+-    """
++    """Returns activation function based on config."""
+     if cfg.activation_func == "ELU":
+         return nn.ELU(inplace=True)
+     elif cfg.activation_func == "ReLU":
+@@ -50,45 +52,40 @@ def activation_func(cfg: EncoderConfig) -> nn.Module:
+     elif cfg.activation_func == "Mish":
+         return nn.Mish(inplace=True)
+     else:
+-        raise Exception("Unknown activation_func")
++        raise Exception(f"Unknown activation_func: {cfg.activation_func}")
+ 
+ 
+ class ResBlock(nn.Module):
+-    """
+-    Residual block in the encoder.
+-
+-    Args:
+-        cfg (EncoderConfig): Encoder configuration.
+-        input_ch (int): Input channel size.
+-        output_ch (int): Output channel size.
+-    """
++    """Residual block for encoder."""
+ 
+-    def __init__(self, cfg: EncoderConfig, input_ch, output_ch):
++    def __init__(self, cfg: EncoderConfig, input_ch: int, output_ch: int):
+         super().__init__()
+-
+         layers = [
+             activation_func(cfg),
+             nn.Conv2d(input_ch, output_ch, kernel_size=3, stride=1, padding=1),
+             activation_func(cfg),
+             nn.Conv2d(output_ch, output_ch, kernel_size=3, stride=1, padding=1),
+         ]
+-
+         self.res_block_core = nn.Sequential(*layers)
+ 
+-    def forward(self, x):
++    def forward(self, x: torch.Tensor) -> torch.Tensor:
+         identity = x
+         out = self.res_block_core(x)
+-        out = out + identity
+-        return out
++        return out + identity
+ 
+ 
+ class ResnetEncoder(Encoder):
+     """
+-    ResNet-based encoder.
+-
+-    Args:
+-        cfg (Config): Configuration.
+-        obs_space (ObsSpace): Observation space.
++    ResNet-based encoder for spatial features.
++    
++    This encoder is identical to follower's encoder, allowing direct
++    weight loading and freezing.
++    
++    Input: dict with 'obs' key containing spatial features
++           shape: (batch, channels, H, W)
++           channels: obstacles, agents, charges, target, battery (for charger)
++    Output: encoded feature vector
++            shape: (batch, encoder_out_size)
+     """
+ 
+     def __init__(self, cfg: Config, obs_space: ObsSpace):
+@@ -101,8 +98,13 @@ class ResnetEncoder(Encoder):
+         layers = []
+ 
+         for out_channels, res_blocks in resnet_conf:
+-            layers.extend([nn.Conv2d(curr_input_channels, out_channels, kernel_size=3, stride=1, padding=1)])
+-            layers.extend([ResBlock(self.encoder_cfg, out_channels, out_channels) for _ in range(res_blocks)])
++            layers.extend([
++                nn.Conv2d(curr_input_channels, out_channels, kernel_size=3, stride=1, padding=1)
++            ])
++            layers.extend([
++                ResBlock(self.encoder_cfg, out_channels, out_channels) 
++                for _ in range(res_blocks)
++            ])
+             curr_input_channels = out_channels
+ 
+         layers.append(activation_func(self.encoder_cfg))
+@@ -117,14 +119,145 @@ class ResnetEncoder(Encoder):
+             )
+             self.encoder_out_size = self.encoder_cfg.hidden_size
+ 
+-        log.debug('Convolutional layer output size: %r', self.conv_head_out_size)
++        log.debug(f'Convolutional layer output size: {self.conv_head_out_size}')
++        
++        # Load and freeze follower weights if checkpoint provided
++        if self.encoder_cfg.follower_checkpoint:
++            self._load_follower_weights(self.encoder_cfg.follower_checkpoint)
++        
++        if self.encoder_cfg.freeze_follower_encoder:
++            self._freeze_encoder()
++
++    def _find_follower_checkpoint(self, checkpoint_path: str) -> Tuple[str, dict]:
++        """
++        Find and load follower checkpoint, similar to follower inference.
++        
++        Args:
++            checkpoint_path: Path to follower checkpoint directory or file
++            
++        Returns:
++            Tuple of (checkpoint_path, checkpoint_dict)
++        """
++        # If path is a directory, find the latest checkpoint
++        if os.path.isdir(checkpoint_path):
++            # Find config.json to verify this is a valid checkpoint directory
++            config_path = os.path.join(checkpoint_path, 'config.json')
++            if not os.path.exists(config_path):
++                raise FileNotFoundError(f"config.json not found in {checkpoint_path}")
++            
++            # Find latest checkpoint file
++            checkpoints = glob.glob(os.path.join(checkpoint_path, 'checkpoint_p0', 'checkpoint_*'))
++            if not checkpoints:
++                # Try alternative pattern
++                checkpoints = glob.glob(os.path.join(checkpoint_path, '*.pt'))
++            
++            if not checkpoints:
++                raise FileNotFoundError(f"No checkpoint files found in {checkpoint_path}")
++            
++            checkpoints.sort()
++            checkpoint_path = checkpoints[-1]
++            log.info(f"Using latest follower checkpoint: {checkpoint_path}")
++        
++        # Load checkpoint (without weights_only for older PyTorch compatibility)
++        checkpoint_dict = torch.load(checkpoint_path, map_location='cpu')
++        return checkpoint_path, checkpoint_dict
++
++    def _load_follower_weights(self, checkpoint_path: str):
++        """
++        Load weights from follower checkpoint into this encoder.
++        
++        This method:
++        1. Loads the follower checkpoint
++        2. Extracts encoder weights from the checkpoint
++        3. Loads weights with strict=False to handle channel differences
++        
++        Args:
++            checkpoint_path: Path to follower checkpoint directory or file
++        """
++        try:
++            checkpoint_path, checkpoint_dict = self._find_follower_checkpoint(checkpoint_path)
++            
++            # Load training config from checkpoint
++            config_path = os.path.join(os.path.dirname(checkpoint_path), 'config.json')
++            if os.path.exists(config_path):
++                with open(config_path, 'r') as f:
++                    follower_config = json.load(f)
++                log.info(f"Loaded follower config from {config_path}")
++                
++                # Check original encoder configuration
++                encoder_cfg = follower_config.get('encoder', {})
++                orig_num_filters = encoder_cfg.get('num_filters', 64)
++                orig_num_res_blocks = encoder_cfg.get('num_res_blocks', 1)
++                
++                # Verify compatibility
++                if orig_num_filters != self.encoder_cfg.num_filters:
++                    log.warning(
++                        f"Follower num_filters ({orig_num_filters}) differs from "
++                        f"charger config ({self.encoder_cfg.num_filters})"
++                    )
++                if orig_num_res_blocks != self.encoder_cfg.num_res_blocks:
++                    log.warning(
++                        f"Follower num_res_blocks ({orig_num_res_blocks}) differs from "
++                        f"charger config ({self.encoder_cfg.num_res_blocks})"
++                    )
++            
++            # Extract model state dict
++            if 'model' in checkpoint_dict:
++                state_dict = checkpoint_dict['model']
++            elif 'actor_critic' in checkpoint_dict:
++                state_dict = checkpoint_dict['actor_critic']
++            else:
++                state_dict = checkpoint_dict
++            
++            # Extract encoder weights (keys starting with 'encoder.')
++            encoder_state = {}
++            for key, value in state_dict.items():
++                if key.startswith('encoder.'):
++                    new_key = key[8:]  # Remove 'encoder.' prefix
++                    encoder_state[new_key] = value
++            
++            if not encoder_state:
++                log.warning(f"No encoder weights found in {checkpoint_path}")
++                return
++            
++            # Load weights with strict=False to allow partial loading
++            load_result = self.load_state_dict(encoder_state, strict=False)
++            
++            if load_result.missing_keys:
++                log.debug(f"Missing keys in encoder: {load_result.missing_keys[:5]}...")
++            if load_result.unexpected_keys:
++                log.debug(f"Unexpected keys in encoder: {load_result.unexpected_keys[:5]}...")
++            
++            log.info(f"Successfully loaded follower encoder weights from {checkpoint_path}")
++            
++        except Exception as e:
++            log.warning(f"Failed to load follower weights: {e}")
++            import traceback
++            log.debug(traceback.format_exc())
++
++    def _freeze_encoder(self):
++        """Freeze encoder parameters."""
++        for param in self.parameters():
++            param.requires_grad = False
++        self.eval()
++        log.info("Encoder frozen (follower weights)")
+ 
+     def get_out_size(self) -> int:
+         return self.encoder_out_size
+ 
+-    def forward(self, x):
+-        x = x['obs']
+-        x = self.conv_head(x)
++    def forward(self, x: dict) -> torch.Tensor:
++        """
++        Forward pass through encoder.
++        
++        Args:
++            x: Observation dict with 'obs' key
++               obs shape: (batch, channels, H, W)
++               
++        Returns:
++            Encoded features: (batch, encoder_out_size)
++        """
++        obs = x['obs']
++        x = self.conv_head(obs)
+         x = x.contiguous().view(-1, self.conv_head_out_size)
+ 
+         if self.encoder_cfg.extra_fc_layers:
+@@ -134,13 +267,17 @@ class ResnetEncoder(Encoder):
+ 
+ 
+ def main():
++    """Test the encoder."""
+     exp_cfg = {'encoder': EncoderConfig().dict()}
+     r = 5
+-    obs = torch.rand(1, 5, r * 2 + 1, r * 2 + 1)  # 5 channels: obstacles, agents, charges, target, battery
++    
++    # Test with charger observation (5 channels)
++    obs = torch.rand(2, 5, r * 2 + 1, r * 2 + 1)
+     q_obs = {'obs': obs}
+-    # noinspection PyTypeChecker
++    
+     re = ResnetEncoder(Namespace(**exp_cfg), dict(obs=obs[0]))
+-    re(q_obs)
++    output = re(q_obs)
++    print(f"Encoder output shape: {output.shape}")
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/charger_appo/planning.py b/charger_appo/planning.py
+index 0aa004b..48450ec 100644
+--- a/charger_appo/planning.py
++++ b/charger_appo/planning.py
+@@ -1,3 +1,10 @@
++"""
++Charger APPO Planning
++
++Reuses the planner from follower. The key difference is in preprocessing
++where the target is dynamically switched between goal and charger based
++on battery level.
++"""
+ from pogema import GridConfig
+ 
+ # noinspection PyUnresolvedReferences
+@@ -14,12 +21,15 @@ except ImportError:
+ 
+ 
+ class PlannerConfig(BaseModel):
++    """Configuration for the planner."""
+     use_static_cost: bool = True
+     use_dynamic_cost: bool = True
+     reset_dynamic_cost: bool = True
+ 
+ 
+ class Planner:
++    """Path planner for multi-agent navigation."""
++    
+     def __init__(self, cfg: PlannerConfig):
+         self.planner = None
+         self.obstacles = None
+@@ -27,21 +37,36 @@ class Planner:
+         self.cfg = cfg
+ 
+     def add_grid_obstacles(self, obstacles, starts):
++        """Set global obstacles and agent start positions."""
+         self.obstacles = obstacles
+         self.starts = starts
+         self.planner = None
+ 
+     def update(self, obs):
++        """Update planner with current observations."""
+         num_agents = len(obs)
+         obs_radius = len(obs[0]['obstacles']) // 2
+         
+-        if self.planner is None and self.obstacles is not None:
+-            self.planner = [planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost) for _ in range(num_agents)]
++        if self.planner is None:
++            self.planner = [
++                planner(
++                    self.obstacles, 
++                    self.cfg.use_static_cost, 
++                    self.cfg.use_dynamic_cost, 
++                    self.cfg.reset_dynamic_cost
++                ) 
++                for _ in range(num_agents)
++            ]
+             for i, p in enumerate(self.planner):
+-                if self.starts and i < len(self.starts):
+-                    p.set_abs_start(self.starts[i])
++                p.set_abs_start(self.starts[i])
++            
+             if self.cfg.use_static_cost:
+-                pen_calc = planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost)
++                pen_calc = planner(
++                    self.obstacles, 
++                    self.cfg.use_static_cost, 
++                    self.cfg.use_dynamic_cost, 
++                    self.cfg.reset_dynamic_cost
++                )
+                 penalties = pen_calc.precompute_penalty_matrix(obs_radius)
+                 for p in self.planner:
+                     p.set_penalties(penalties)
+@@ -49,33 +74,38 @@ class Planner:
+         for k in range(num_agents):
+             if obs[k]['xy'] == obs[k]['target_xy']:
+                 continue
+-            
+-            # Always plan to target - let the model decide whether to go to charger
+-            target = obs[k]['target_xy']
+-            
+-            if self.planner and self.planner[k] is not None:
+-                obs[k]['agents'][obs_radius][obs_radius] = 0
+-                self.planner[k].update_occupations(obs[k]['agents'], (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), target)
+-                obs[k]['agents'][obs_radius][obs_radius] = 1
+-                self.planner[k].update_path(obs[k]['xy'], target)
++            obs[k]['agents'][obs_radius][obs_radius] = 0
++            self.planner[k].update_occupations(
++                obs[k]['agents'], 
++                (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), 
++                obs[k]['target_xy']
++            )
++            obs[k]['agents'][obs_radius][obs_radius] = 1
++            self.planner[k].update_path(obs[k]['xy'], obs[k]['target_xy'])
+ 
+     def get_path(self):
++        """Get planned paths for all agents."""
+         results = []
+-        for idx in range(len(self.planner)) if self.planner else range(0):
++        for idx in range(len(self.planner)):
+             results.append(self.planner[idx].get_path())
+         return results
+ 
+ 
+ class ResettablePlanner:
++    """Wrapper for planner that supports resetting."""
++    
+     def __init__(self, cfg: PlannerConfig):
+         self._cfg = cfg
+         self._agent = None
+ 
+     def update(self, observations):
++        """Update internal planner with observations."""
+         return self._agent.update(observations)
+ 
+     def get_path(self):
++        """Get paths from internal planner."""
+         return self._agent.get_path()
+ 
+-    def reset_states(self, ):
++    def reset_states(self):
++        """Reset the internal planner."""
+         self._agent = Planner(self._cfg)
+diff --git a/charger_appo/preprocessing.py b/charger_appo/preprocessing.py
+index 9377cba..67c71ea 100644
+--- a/charger_appo/preprocessing.py
++++ b/charger_appo/preprocessing.py
+@@ -1,3 +1,10 @@
++"""
++Charger APPO Preprocessing
++
++Key modification from follower:
++- When battery < charge_threshold, planner targets nearest charger instead of goal
++- This creates smooth transition between goal-seeking and charging behavior
++"""
+ import numpy as np
+ import gymnasium
+ from gymnasium import ObservationWrapper
+@@ -7,18 +14,30 @@ from charger_appo.planning import ResettablePlanner, PlannerConfig
+ 
+ 
+ class PreprocessorConfig(PlannerConfig):
++    """
++    Configuration for charger appo preprocessing.
++    
++    Args:
++        network_input_radius: Radius for observation cropping
++        intrinsic_target_reward: Reward for achieving subgoals
++        charge_threshold: Battery threshold below which agent seeks charger (0.0-1.0)
++        charger_intrinsic_reward: Reward for charger subgoals (can be different from target reward)
++    """
+     network_input_radius: int = 5
+     intrinsic_target_reward: float = 0.01
+-    # battery_scale will be set from initial battery value during reset
++    charge_threshold: float = 0.3  # When battery < 30%, seek charger
++    charger_intrinsic_reward: float = 0.01  # Can be higher to prioritize charging
+ 
+ 
+ def charger_appo_preprocessor(env, algo_config):
++    """Wrap environment with charger appo preprocessing."""
+     env = wrap_preprocessors(env, algo_config.training_config.preprocessing)
+     return env
+ 
+ 
+ def wrap_preprocessors(env, config: PreprocessorConfig, auto_reset=False):
+-    env = charger_appoWrapper(env=env, config=config)
++    """Apply all preprocessing wrappers."""
++    env = ChargerWrapper(env=env, config=config)
+     env = CutObservationWrapper(env, target_observation_radius=config.network_input_radius)
+     env = ConcatPositionalFeatures(env)
+     if auto_reset:
+@@ -26,7 +45,18 @@ def wrap_preprocessors(env, config: PreprocessorConfig, auto_reset=False):
+     return env
+ 
+ 
+-class charger_appoWrapper(ObservationWrapper):
++class ChargerWrapper(ObservationWrapper):
++    """
++    Main wrapper with battery-aware target switching.
++
++    When battery < charge_threshold:
++    - Planner targets nearest charger instead of goal
++    - Intrinsic reward uses charger_intrinsic_reward
++
++    When battery >= charge_threshold:
++    - Planner targets goal (same as follower)
++    - Intrinsic reward uses intrinsic_target_reward
++    """
+ 
+     def __init__(self, env, config: PreprocessorConfig):
+         super().__init__(env)
+@@ -34,58 +64,152 @@ class charger_appoWrapper(ObservationWrapper):
+         self.re_plan = ResettablePlanner(self._cfg)
+         self.prev_goals = None
+         self.intrinsic_reward = None
+-        self.battery_scale = None  # Will be set from initial battery value
+-        
+-        # Update observation space to include all spatial channels
+-        obs_space = self.observation_space
+-        full_size = obs_space['obstacles'].shape[0]
+-        obs_space['charges'] = Box(0.0, 1.0, shape=(full_size, full_size))
+-        obs_space['target'] = Box(0.0, 1.0, shape=(full_size, full_size))
+-        obs_space['battery'] = Box(0.0, 1.0, shape=(full_size, full_size))
++        self.battery_scale = None  # Will be set from initial battery
++        self.nearest_charger_xy = None  # Store nearest charger for each agent
+ 
+     @staticmethod
+     def get_relative_xy(x, y, tx, ty, obs_radius):
++        """Convert global coordinates to relative observation coordinates."""
+         dx, dy = x - tx, y - ty
+         if dx > obs_radius or dx < -obs_radius or dy > obs_radius or dy < -obs_radius:
+             return None, None
+         return obs_radius - dx, obs_radius - dy
+ 
++    def _find_nearest_charger(self, obs: dict) -> tuple:
++        """
++        Find the nearest charger from agent's current position.
++
++        Args:
++            obs: Agent observation dictionary
++
++        Returns:
++            (cx, cy) of nearest charger, or None if no charger found
++        """
++        charges_xy = obs.get('charges_xy', [])
++        if not charges_xy:
++            return None
++
++        # Find nearest charger by Manhattan distance
++        agent_x, agent_y = obs['xy']
++        min_dist = float('inf')
++        nearest_charger = None
++
++        for cx, cy in charges_xy:
++            dist = abs(agent_x - cx) + abs(agent_y - cy)
++            if dist < min_dist:
++                min_dist = dist
++                nearest_charger = (cx, cy)
++
++        return nearest_charger
++
++    def _get_battery_level(self, obs: dict) -> float:
++        """
++        Get normalized battery level (0.0 - 1.0).
++        
++        Args:
++            obs: Agent observation dictionary
++            
++        Returns:
++            Normalized battery level
++        """
++        battery = obs.get('battery', self.battery_scale)
++        if isinstance(battery, (int, float)):
++            battery_val = battery
++        elif hasattr(battery, '__len__') and len(battery) > 0:
++            battery_val = battery[0]
++        else:
++            battery_val = self.battery_scale
++        
++        return battery_val / self.battery_scale if self.battery_scale else 1.0
++
++    def _determine_target(self, obs: dict) -> tuple:
++        """
++        Determine planning target based on battery level.
++
++        Args:
++            obs: Agent observation dictionary
++
++        Returns:
++            (target_x, target_y, is_charger_target, nearest_charger)
++        """
++        battery_level = self._get_battery_level(obs)
++        nearest_charger = self._find_nearest_charger(obs)
++
++        if battery_level < self._cfg.charge_threshold and nearest_charger is not None:
++            # Battery low: target nearest charger
++            return nearest_charger[0], nearest_charger[1], True, nearest_charger
++
++        # Battery OK or no charger found: target goal
++        return obs['target_xy'][0], obs['target_xy'][1], False, nearest_charger
++
+     def observation(self, observations):
+         # Set battery_scale from initial battery value if not set
+         if self.battery_scale is None and len(observations) > 0:
+-            # Use the first agent's initial battery as the scale
+             initial_battery = observations[0].get('battery', 100)
+-            self.battery_scale = initial_battery if isinstance(initial_battery, (int, float)) else initial_battery[0] if hasattr(initial_battery, '__len__') else 100
++            if isinstance(initial_battery, (int, float)):
++                self.battery_scale = initial_battery
++            elif hasattr(initial_battery, '__len__') and len(initial_battery) > 0:
++                self.battery_scale = initial_battery[0]
++            else:
++                self.battery_scale = 100
++
++        # Determine targets and nearest chargers for each agent
++        targets = []
++        target_is_charger = []
++        nearest_chargers = []
++        for obs in observations:
++            tx, ty, is_charger, nearest_charger = self._determine_target(obs)
++            targets.append((tx, ty))
++            target_is_charger.append(is_charger)
++            nearest_chargers.append(nearest_charger if nearest_charger else (0, 0))
+         
+-        # Update cost penalties based on the current observations, independently for each agent.
+-        self.re_plan.update(observations)
++        # Store nearest charger info for ConcatPositionalFeatures
++        self.nearest_charger_xy = nearest_chargers
+ 
+-        # Retrieve the shortest path to the global target for each agent.
+-        paths = self.re_plan.get_path()
++        # Temporarily modify observations for planner
++        # Planner uses target_xy to compute paths
++        original_targets = [obs['target_xy'] for obs in observations]
++        for k, obs in enumerate(observations):
++            obs['target_xy'] = targets[k]
+ 
+-        new_goals = []  # Initialize a list to store new goals for each agent.
+-        intrinsic_rewards = [0.0] * len(observations)  # Initialize with zeros for all agents
++        # Update cost penalties and compute paths
++        self.re_plan.update(observations)
++        paths = self.re_plan.get_path()
+ 
+-        # Iterate through agents and their respective paths.
++        # Restore original targets (for observation consistency)
+         for k, obs in enumerate(observations):
+-            path = paths[k] if k < len(paths) else None
++            obs['target_xy'] = original_targets[k]
++
++        new_goals = []
++        intrinsic_rewards = []
+ 
+-            # Check if there is no valid path available.
+-            if path is None:
+-                new_goals.append(obs['target_xy'])  # Use the target position as a new goal.
++        # Process each agent
++        for k, path in enumerate(paths):
++            obs = observations[k]
++            is_charger_target = target_is_charger[k]
++
++            if path is None or len(path) < 2:
++                # No valid path: use current target as goal
++                new_goals.append(targets[k])
++                intrinsic_rewards.append(0.0)
+                 path = []
+             else:
+-                # Check if the agent reached their subgoal from its previous step
++                # Check if agent reached subgoal
+                 subgoal_achieved = self.prev_goals and obs['xy'] == self.prev_goals[k]
+-                # Assign an intrinsic reward if conditions are met, otherwise set it to 0.
+-                intrinsic_rewards[k] = self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
+-                # Select a new target point.
++
++                # Select reward based on target type
++                if is_charger_target:
++                    reward_val = self._cfg.charger_intrinsic_reward if subgoal_achieved else 0.0
++                else:
++                    reward_val = self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
++
++                intrinsic_rewards.append(reward_val)
+                 new_goals.append(path[1])
+ 
+-            # Set obstacle values to -1.0 in the observation.
++            # Preprocess obstacles: set obstacle values to -1.0
+             obs['obstacles'][obs['obstacles'] > 0] *= -1
+ 
+-            # Adding path to the observation, setting path values to +1.0.
++            # Add path to observation (+1.0 for path cells)
+             r = obs['obstacles'].shape[0] // 2
+             for idx, (gx, gy) in enumerate(path):
+                 x, y = self.get_relative_xy(*obs['xy'], gx, gy, r)
+@@ -93,51 +217,45 @@ class charger_appoWrapper(ObservationWrapper):
+                     obs['obstacles'][x, y] = 1.0
+                 else:
+                     break
+-            
+-            # Add charger positions to a new channel (always add, regardless of path)
+-            obs['charges'] = np.zeros_like(obs['obstacles'])
+-            for cx, cy in obs.get('charges_xy', []):
+-                x, y = self.get_relative_xy(*obs['xy'], cx, cy, r)
+-                if x is not None and y is not None:
+-                    obs['charges'][x, y] = 1.0
+-            
+-            # Add target position to a new channel
+-            obs['target'] = np.zeros_like(obs['obstacles'])
+-            tx, ty = obs['target_xy']
+-            x, y = self.get_relative_xy(*obs['xy'], tx, ty, r)
+-            if x is not None and y is not None:
+-                obs['target'][x, y] = 1.0
+-            
+-            # Add battery level as a channel (filled with normalized battery value)
+-            battery = obs.get('battery', self.battery_scale)
+-            battery_val = battery if isinstance(battery, (int, float)) else battery[0] if hasattr(battery, '__len__') else self.battery_scale
+-            obs['battery'] = np.full_like(obs['obstacles'], battery_val / self.battery_scale, dtype=np.float32)
+-            
+-            # print(obs['obstacles'])
+-        # Update the previous goals and intrinsic rewards for the next step.
++
++        # Update state for next step
+         self.prev_goals = new_goals
+         self.intrinsic_reward = intrinsic_rewards
+ 
+         return observations
+ 
+     def get_intrinsic_rewards(self, reward):
+-        for agent_idx, r in enumerate(reward):
++        """Replace environment rewards with intrinsic rewards."""
++        for agent_idx in range(len(reward)):
+             reward[agent_idx] = self.intrinsic_reward[agent_idx]
+         return reward
+ 
+     def step(self, action):
+         observation, reward, done, tr, info = self.env.step(action)
+-        return self.observation(observation), self.get_intrinsic_rewards(reward), done, tr, info
++        return (
++            self.observation(observation), 
++            self.get_intrinsic_rewards(reward), 
++            done, 
++            tr, 
++            info
++        )
+ 
+     def reset_state(self):
++        """Reset planner state."""
+         self.re_plan.reset_states()
+-        self.battery_scale = None  # Reset battery_scale for new episode
++        self.battery_scale = None
++        
+         if hasattr(self, 'get_global_obstacles'):
+-            self.re_plan._agent.add_grid_obstacles(self.get_global_obstacles(), self.get_global_agents_xy())
++            self.re_plan._agent.add_grid_obstacles(
++                self.get_global_obstacles(), 
++                self.get_global_agents_xy()
++            )
+         else:
+-            # Fallback: use local obstacles if global not available
+             self.re_plan._agent.add_grid_obstacles(None, None)
+ 
++        self.prev_goals = None
++        self.intrinsic_reward = None
++
+     def reset(self, **kwargs):
+         observations, infos = self.env.reset(**kwargs)
+         self.reset_state()
+@@ -145,6 +263,8 @@ class charger_appoWrapper(ObservationWrapper):
+ 
+ 
+ class CutObservationWrapper(ObservationWrapper):
++    """Crop observations to target radius."""
++    
+     def __init__(self, env, target_observation_radius):
+         super().__init__(env)
+         self._target_obs_radius = target_observation_radius
+@@ -170,21 +290,38 @@ class CutObservationWrapper(ObservationWrapper):
+ 
+ 
+ class ConcatPositionalFeatures(ObservationWrapper):
++    """
++    Concatenate spatial features and preserve scalar features.
++
++    Spatial features (concatenated into 'obs'):
++    - obstacles, agents, charges, battery
++
++    Scalar features (preserved as-is):
++    - xy: (2,) - agent position
++    - target_xy: (2,) - target position
++    - charge_xy: (2,) - nearest charger position (same as planner uses)
++    - battery: (1,) - scalar battery level
++
++    Note: charge_xy is set by ChargerWrapper to match the planner's target charger.
++    """
+ 
+     def __init__(self, env):
+         super().__init__(env)
+         self.to_concat = []
+-        self.scalar_features = []
+ 
+         observation_space = Dict()
+         full_size = self.env.observation_space['obstacles'].shape[0]
+ 
+-        for key, value in self.observation_space.items():
++        for key, value in self.env.observation_space.items():
+             if value.shape == (full_size, full_size):
+                 self.to_concat.append(key)
+             else:
+-                self.scalar_features.append(key)
+-                observation_space[key] = value
++                # Keep scalar features as-is, but convert charges_xy to charge_xy
++                if key == 'charges_xy':
++                    # Replace charges_xy (Box for list) with charge_xy (Box for single (2,))
++                    observation_space['charge_xy'] = Box(-1024, 1024, (2,), np.int64)
++                else:
++                    observation_space[key] = value
+ 
+         obs_shape = (len(self.to_concat), full_size, full_size)
+         observation_space['obs'] = Box(0.0, 1.0, shape=obs_shape)
+@@ -199,11 +336,37 @@ class ConcatPositionalFeatures(ObservationWrapper):
+ 
+             for key in obs:
+                 obs[key] = np.array(obs[key], dtype=np.float32)
++            
++            # Set charge_xy from ChargerWrapper's stored nearest_charger_xy
++            if hasattr(self.env, 'nearest_charger_xy') and self.env.nearest_charger_xy is not None:
++                charger = self.env.nearest_charger_xy[agent_idx]
++                obs['charge_xy'] = np.array(charger, dtype=np.float32)
++            else:
++                # Fallback: find nearest charger ourselves
++                charges_xy = obs.get('charges_xy', [])
++                if charges_xy:
++                    agent_x, agent_y = obs['xy']
++                    min_dist = float('inf')
++                    nearest = (0, 0)
++                    for cx, cy in charges_xy:
++                        dist = abs(agent_x - cx) + abs(agent_y - cy)
++                        if dist < min_dist:
++                            min_dist = dist
++                            nearest = (cx, cy)
++                    obs['charge_xy'] = np.array(nearest, dtype=np.float32)
++                else:
++                    obs['charge_xy'] = np.array([0, 0], dtype=np.float32)
++            
++            # Remove charges_xy after converting to charge_xy
++            if 'charges_xy' in obs:
++                del obs['charges_xy']
++            
+             observations[agent_idx]['obs'] = main_obs.astype(np.float32)
+         return observations
+ 
+     @staticmethod
+     def key_comparator(x):
++        """Sort channels in consistent order."""
+         if x == 'obstacles':
+             return '0_' + x
+         elif 'agents' in x:
+@@ -218,6 +381,8 @@ class ConcatPositionalFeatures(ObservationWrapper):
+ 
+ 
+ class AutoResetWrapper(gymnasium.Wrapper):
++    """Automatically reset environment when all agents are done."""
++    
+     def step(self, action):
+         observations, rewards, terminated, truncated, infos = self.env.step(action)
+         if all(terminated) or all(truncated):
+diff --git a/charger_appo/register_env.py b/charger_appo/register_env.py
+index 5cac296..4e29158 100644
+--- a/charger_appo/register_env.py
++++ b/charger_appo/register_env.py
+@@ -1,3 +1,6 @@
++"""
++Charger APPO Environment Registration
++"""
+ import numpy as np
+ from sample_factory.utils.typing import Env
+ from sample_factory.envs.env_utils import register_env
+@@ -11,39 +14,59 @@ from charger_appo.preprocessing import PreprocessorConfig, wrap_preprocessors
+ 
+ 
+ def create_env(environment_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
++    """Create a single charger appo environment."""
++    # Handle initial_battery - convert to list if it's an int
++    # This is required for pogema-charge compatibility
++    if hasattr(environment_cfg.grid_config, 'initial_battery'):
++        initial_battery = environment_cfg.grid_config.initial_battery
++        if isinstance(initial_battery, int):
++            # Convert to list for all agents
++            num_agents = environment_cfg.grid_config.num_agents
++            environment_cfg.grid_config.initial_battery = [initial_battery] * num_agents
++    
+     env = create_env_base(environment_cfg)
+     env = wrap_preprocessors(env, config=preprocessing_cfg, auto_reset=True)
+     return env
+ 
+ 
+ class MultiEnv(gymnasium.Wrapper):
++    """
++    Wrapper for managing multiple parallel environments.
++    Aggregates observations, rewards, and done signals across all environments.
++    """
++    
+     def __init__(self, env_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
+         if env_cfg.target_num_agents is None:
+             self.envs = [create_env(env_cfg, preprocessing_cfg)]
+         else:
+             assert env_cfg.target_num_agents % env_cfg.grid_config.num_agents == 0, \
+-                "Target num charger_appo must be divisible by num agents"
++                "Target num_agents must be divisible by num_agents"
+             num_envs = env_cfg.target_num_agents // env_cfg.grid_config.num_agents
+             self.envs = [create_env(env_cfg, preprocessing_cfg) for _ in range(num_envs)]
+ 
+         super().__init__(self.envs[0])
+ 
+     def step(self, actions):
++        """Step all environments and aggregate results."""
+         obs, rewards, dones, truncated, infos = [], [], [], [], []
+         last_agents = 0
++        
+         for env in self.envs:
+             env_num_agents = env.get_num_agents()
+             action = actions[last_agents: last_agents + env_num_agents]
+             last_agents = last_agents + env_num_agents
++            
+             o, r, d, t, i = env.step(action)
+             obs += o
+             rewards += r
+             dones += d
+             truncated += t
+             infos += i
++            
+         return obs, rewards, dones, truncated, infos
+ 
+     def reset(self, seed, **kwargs):
++        """Reset all environments with different seeds."""
+         obs = []
+         for idx, env in enumerate(self.envs):
+             inner_seed = seed + idx
+@@ -52,6 +75,7 @@ class MultiEnv(gymnasium.Wrapper):
+         return obs, {}
+ 
+     def sample_actions(self):
++        """Sample random actions from all environments."""
+         actions = []
+         for env in self.envs:
+             actions += list(env.sample_actions())
+@@ -59,39 +83,48 @@ class MultiEnv(gymnasium.Wrapper):
+ 
+     @property
+     def num_agents(self):
++        """Total number of agents across all environments."""
+         return sum([env.get_num_agents() for env in self.envs])
+ 
+     def render(self):
++        """Render all environments."""
+         for q in self.envs:
+             q.render()
+ 
+ 
+ def make_env(full_env_name, cfg=None, env_config=None, render_mode=None):
++    """Factory function for creating environments."""
+     p_config = Experiment(**vars(cfg))
+     environment_config = p_config.environment
+     preprocessing_config = p_config.preprocessing
+-    # todo make this code simpler
+ 
+     if environment_config.agent_bins is not None and environment_config.target_num_agents is not None:
+         if environment_config.env_id is None:
+             num_agents = environment_config.agent_bins[0]
+         else:
+-            num_agents = environment_config.agent_bins[environment_config.env_id % len(environment_config.agent_bins)]
++            num_agents = environment_config.agent_bins[
++                environment_config.env_id % len(environment_config.agent_bins)
++            ]
+         environment_config.grid_config.num_agents = num_agents
+ 
+         return MultiEnv(environment_config, preprocessing_config)
++    
+     return create_env(environment_config, preprocessing_config)
+ 
+ 
+ class CustomEnv:
++    """Custom environment factory for Sample Factory."""
++    
+     def make_env(self, env_name, cfg, env_config, render_mode) -> Env:
+         return make_env(env_name, cfg, env_config, render_mode)
+ 
+ 
+ def register_pogema_envs(env_name):
++    """Register Pogema environments with Sample Factory."""
+     env_factory = CustomEnv()
+     register_env(env_name, env_factory.make_env)
+ 
+ 
+ def register_custom_components(env_name):
++    """Register all custom components for charger appo."""
+     register_pogema_envs(env_name)
+diff --git a/charger_appo/register_training_utils.py b/charger_appo/register_training_utils.py
+index 20859ae..2275d79 100644
+--- a/charger_appo/register_training_utils.py
++++ b/charger_appo/register_training_utils.py
+@@ -1,22 +1,43 @@
++"""
++Charger APPO Training Utilities Registration
++
++Registers the charger encoder and actor-critic with Sample Factory.
++Also handles parameter freezing for fine-tuning.
++"""
+ from charger_appo.model import ResnetEncoder
++from charger_appo.actor_critic import ChargerActorCritic, create_charger_actor_critic
+ 
+ from sample_factory.algo.utils.context import global_model_factory
+-from sample_factory.utils.typing import ObsSpace
++from sample_factory.utils.typing import ObsSpace, ActionSpace
+ from sample_factory.model.encoder import Encoder
+ from tensorboardX import SummaryWriter
+ from sample_factory.utils.typing import Config, PolicyID
+ from sample_factory.algo.runners.runner import AlgoObserver, Runner
+ 
+ import numpy as np
+-
+ from sample_factory.utils.utils import log
+ 
+ 
+ def pogema_extra_episodic_stats_processing(*args, **kwargs):
++    """Placeholder for episodic stats processing."""
+     pass
+ 
+ 
+-def pogema_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: SummaryWriter, env_steps: int):
++def pogema_extra_summaries(
++    runner: Runner, 
++    policy_id: PolicyID, 
++    summary_writer: SummaryWriter, 
++    env_steps: int
++):
++    """
++    Log extra summaries to TensorBoard.
++    
++    Logs metrics like:
++    - Success rate
++    - Path length
++    - Battery usage
++    - Charger visits
++    """
+     policy_avg_stats = runner.policy_avg_stats
+     for key in policy_avg_stats:
+         if key in ['reward', 'len', 'true_reward', 'Done']:
+@@ -28,19 +49,133 @@ def pogema_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer:
+ 
+ 
+ class CustomExtraSummariesObserver(AlgoObserver):
+-    def extra_summaries(self, runner: Runner, policy_id: PolicyID, writer: SummaryWriter, env_steps: int) -> None:
++    """Observer for logging extra summaries during training."""
++    
++    def extra_summaries(
++        self, 
++        runner: Runner, 
++        policy_id: PolicyID, 
++        writer: SummaryWriter, 
++        env_steps: int
++    ) -> None:
+         pogema_extra_summaries(runner, policy_id, writer, env_steps)
+ 
+ 
+ def register_msg_handlers(cfg: Config, runner: Runner):
++    """Register message handlers for training statistics."""
+     runner.register_episodic_stats_handler(pogema_extra_episodic_stats_processing)
+     runner.register_observer(CustomExtraSummariesObserver())
+ 
+ 
+ def make_custom_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
+-    """Factory function as required by the API."""
++    """Factory function to create charger encoder."""
+     return ResnetEncoder(cfg, obs_space)
+ 
+ 
++def make_custom_actor_critic(
++    cfg: Config,
++    obs_space: ObsSpace,
++    action_space: ActionSpace
++):
++    """
++    Factory function to create charger actor-critic.
++    
++    Note: We're now using Sample Factory's default actor-critic.
++    The custom ResnetEncoder will be used by SF's default AC.
++    This is the same approach as follower - simpler and more robust.
++    """
++    # Return None to let Sample Factory use its default ActorCritic
++    # The custom encoder will be automatically used
++    return None
++
++
+ def register_custom_model():
++    """
++    Register custom encoder with Sample Factory.
++    
++    We only register the encoder factory, similar to follower.
++    Sample Factory will use its default ActorCritic with our custom encoder.
++    This is simpler and more robust than implementing a full custom ActorCritic.
++    """
+     global_model_factory().register_encoder_factory(make_custom_encoder)
++    # Note: We don't register actor_critic factory - let SF use its default
++
++
++def freeze_encoder_params(model):
++    """
++    Freeze encoder parameters in the actor-critic model.
++    
++    This is useful for fine-tuning where you want to:
++    1. Keep the learned spatial features from follower
++    2. Only train the actor/critic heads for battery-aware behavior
++    
++    Args:
++        model: ChargerActorCritic model
++    """
++    if hasattr(model, 'encoder'):
++        for param in model.encoder.parameters():
++            param.requires_grad = False
++        model.encoder.eval()
++        log.info("Encoder parameters frozen")
++    
++    # Also freeze scalar_mlp if you want to only train actor/critic heads
++    if hasattr(model, 'scalar_mlp'):
++        for param in model.scalar_mlp.parameters():
++            param.requires_grad = False
++        model.scalar_mlp.eval()
++        log.info("Scalar MLP parameters frozen")
++
++
++def get_trainable_params(model) -> dict:
++    """
++    Get information about trainable parameters in the model.
++    
++    Args:
++        model: ChargerActorCritic model
++        
++    Returns:
++        Dictionary with parameter counts
++    """
++    total_params = sum(p.numel() for p in model.parameters())
++    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
++    
++    encoder_params = sum(p.numel() for p in model.encoder.parameters()) if hasattr(model, 'encoder') else 0
++    encoder_trainable = sum(p.numel() for p in model.encoder.parameters() if p.requires_grad) if hasattr(model, 'encoder') else 0
++    
++    actor_params = sum(p.numel() for p in model.actor.parameters()) if hasattr(model, 'actor') else 0
++    critic_params = sum(p.numel() for p in model.critic.parameters()) if hasattr(model, 'critic') else 0
++    
++    scalar_mlp_params = sum(p.numel() for p in model.scalar_mlp.parameters()) if hasattr(model, 'scalar_mlp') else 0
++    scalar_mlp_trainable = sum(p.numel() for p in model.scalar_mlp.parameters() if p.requires_grad) if hasattr(model, 'scalar_mlp') else 0
++    
++    return {
++        'total_params': total_params,
++        'trainable_params': trainable_params,
++        'encoder_params': encoder_params,
++        'encoder_trainable': encoder_trainable,
++        'actor_params': actor_params,
++        'critic_params': critic_params,
++        'scalar_mlp_params': scalar_mlp_params,
++        'scalar_mlp_trainable': scalar_mlp_trainable,
++    }
++
++
++def log_model_summary(model):
++    """
++    Log a summary of the model architecture and trainable parameters.
++    
++    Args:
++        model: ChargerActorCritic model
++    """
++    param_info = get_trainable_params(model)
++    
++    log.info("=" * 60)
++    log.info("Charger Actor-Critic Model Summary")
++    log.info("=" * 60)
++    log.info(f"Total parameters: {param_info['total_params']:,}")
++    log.info(f"Trainable parameters: {param_info['trainable_params']:,}")
++    log.info(f"  Encoder: {param_info['encoder_trainable']:,} / {param_info['encoder_params']:,}")
++    log.info(f"  Scalar MLP: {param_info['scalar_mlp_trainable']:,} / {param_info['scalar_mlp_params']:,}")
++    log.info(f"  Actor: {param_info['actor_params']:,}")
++    log.info(f"  Critic: {param_info['critic_params']:,}")
++    log.info("=" * 60)
+diff --git a/charger_appo/training_config.py b/charger_appo/training_config.py
+index 2eef987..9f6fb87 100644
+--- a/charger_appo/training_config.py
++++ b/charger_appo/training_config.py
+@@ -1,4 +1,12 @@
+-from typing import Optional, Union
++"""
++Charger APPO Training Configuration
++
++Key differences from follower:
++- Adds battery and charger configuration
++- Adds charge_threshold for target switching
++- Adds option to freeze follower encoder weights
++"""
++from typing import Optional, Union, List
+ 
+ from charger_appo.model import EncoderConfig
+ from charger_appo.preprocessing import PreprocessorConfig
+@@ -9,10 +17,19 @@ except ImportError:
+     from typing_extensions import Literal
+ 
+ from pogema import GridConfig
+-from pydantic import BaseModel
++from pydantic import BaseModel, Field
+ 
+ 
+ class DecMAPFConfig(GridConfig):
++    """
++    Decentralized MAPF configuration with battery and charger support.
++    
++    Args:
++        initial_battery: Initial battery level for all agents (list or int)
++        battery_decrement: Battery decrement per step
++        charge_increment: Battery increment when charging
++        num_charges: Number of chargers on the map
++    """
+     integration: Literal['SampleFactory'] = 'SampleFactory'
+     collision_system: Literal['priority', 'block_both', 'soft'] = 'soft'
+     observation_type: Literal['POMAPF'] = 'POMAPF'
+@@ -21,10 +38,21 @@ class DecMAPFConfig(GridConfig):
+     num_agents: int = 64
+     obs_radius: int = 5
+     max_episode_steps: int = 512
+-    map_name: str = '(wc3-[A-P]|sc1-[A-S]|sc1-TaleofTwoCities|street-[A-P]|mazes-s[0-9]_|mazes-s[1-3][0-9]_|random-s[0-9]_|random-s[1-3][0-9]_)'
+-
+-
+-class Environment(BaseModel, ):
++    map_name: str = (
++        '(wc3-[A-P]|sc1-[A-S]|sc1-TaleofTwoCities|street-[A-P]|'
++        r'mazes-s[0-9]_|mazes-s[1-3][0-9]_|random-s[0-9]_|random-s[1-3][0-9]_)'
++    )
++    
++    # Battery and charger configuration
++    # Note: initial_battery must be a list for pogema-charge compatibility
++    initial_battery: Union[int, List[int]] = 100
++    battery_decrement: int = 1
++    charge_increment: int = 3
++    num_charges: int = 4  # ~1 charger per 16 agents
++
++
++class Environment(BaseModel):
++    """Base environment configuration."""
+     grid_config: DecMAPFConfig = DecMAPFConfig()
+     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+     with_animation: bool = False
+@@ -34,65 +62,116 @@ class Environment(BaseModel, ):
+     target_num_agents: Optional[int] = None
+     agent_bins: Optional[list] = [64, 128, 256, 256]
+     use_maps: bool = True
+-
+     every_step_metrics: bool = False
+ 
+ 
+ class EnvironmentMazes(Environment):
++    """Mazes environment configuration."""
+     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+     use_maps: bool = True
+     target_num_agents: Optional[int] = 256
+     agent_bins: Optional[list] = [128, 256, 256, 256]
+-    grid_config: DecMAPFConfig = DecMAPFConfig(on_target='restart', max_episode_steps=512,
+-                                               map_name=r'mazes-.+')
++    grid_config: DecMAPFConfig = DecMAPFConfig(
++        on_target='restart', 
++        max_episode_steps=512,
++        map_name=r'mazes-.+'
++    )
++
++
++class PreprocessorConfigExt(PreprocessorConfig):
++    """
++    Extended preprocessor configuration for charger appo.
++    
++    Args:
++        charge_threshold: Battery threshold (0.0-1.0) below which agent seeks charger
++        charger_intrinsic_reward: Intrinsic reward for charger subgoals
++        use_charger_xy_input: Whether to pass nearest charger xy as input to network
++    """
++    charge_threshold: float = 0.3
++    charger_intrinsic_reward: float = 0.01
++    use_charger_xy_input: bool = True
++
++
++class EncoderConfigExt(EncoderConfig):
++    """
++    Extended encoder configuration for charger appo.
++    
++    Args:
++        follower_checkpoint: Path to pre-trained follower checkpoint.
++                            Default: 'model/follower' (relative to project root)
++        freeze_follower_encoder: Whether to freeze follower encoder parameters
++        use_scalar_features: Whether to use scalar features (xy, target_xy, battery, etc.)
++        use_charger_xy_input: Whether to include charger_xy in scalar inputs
++    """
++    follower_checkpoint: Optional[str] = 'model/follower'
++    freeze_follower_encoder: bool = True
++    use_scalar_features: bool = True
++    use_charger_xy_input: bool = True
+ 
+ 
+ class Experiment(BaseModel):
++    """
++    Full experiment configuration for charger APPO training.
++    
++    This configuration extends follower with:
++    - Battery and charger support
++    - Dynamic target switching based on battery level
++    - Optional freezing of follower encoder weights
++    """
++    # Environment
+     environment: EnvironmentMazes = EnvironmentMazes()
+-    encoder: EncoderConfig = EncoderConfig()
+-    preprocessing: PreprocessorConfig = PreprocessorConfig()
++    encoder: EncoderConfigExt = EncoderConfigExt()
++    preprocessing: PreprocessorConfigExt = PreprocessorConfigExt()
+ 
++    # Training hyperparameters
+     rollout: int = 8
+     num_workers: int = 4
+-
+     recurrence: int = 8
+     use_rnn: bool = False
+     rnn_size: int = 256
+ 
++    # PPO parameters
+     ppo_clip_ratio: float = 0.1
+     batch_size: int = 2048
+-
+     exploration_loss_coeff: float = 0.018
+     num_envs_per_worker: int = 4
+     worker_num_splits: int = 1
+     max_policy_lag: int = 1
+ 
++    # Optimization
+     force_envs_single_thread: bool = True
+     optimizer: Literal["adam", "lamb"] = 'adam'
+     restart_behavior: str = "overwrite"  # ["resume", "restart", "overwrite"]
+     normalize_returns: bool = False
+     async_rl: bool = False
+     num_batches_per_epoch: int = 16
+-
+     num_batches_to_accumulate: int = 1
+     normalize_input: bool = False
+-    decoder_mlp_layers = []
++    decoder_mlp_layers: List[int] = Field(default_factory=list)
+     save_best_metric: str = "avg_throughput"
+     value_bootstrap: bool = True
+     save_milestones_sec: int = -1
+ 
++    # Checkpointing and logging
+     keep_checkpoints: int = 1
+     stats_avg: int = 10
+     learning_rate: float = 0.000146
+     train_for_env_steps: int = 1_000_000
+-
+     gamma: float = 0.965
+-
+     lr_schedule: str = 'kl_adaptive_minibatch'
+ 
+-    experiment: str = 'exp'
++    # Experiment metadata
++    experiment: str = 'charger_exp'
+     train_dir: str = 'experiments/train_dir/charger_appo'
+     seed: Optional[int] = 42
+-    use_wandb: bool = True
++    use_wandb: bool = False  # Default to False, can be enabled for production runs
+     device: str = 'cpu'
+     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
++    
++    # Charger-specific settings
++    follower_checkpoint: Optional[str] = 'model/follower'  # Path to frozen follower weights
++    freeze_follower: bool = True  # Freeze follower encoder during training
++    
++    # Battery-aware settings
++    charge_threshold: float = 0.3  # Battery threshold for charger seeking
++    charger_intrinsic_reward: float = 0.01  # Reward for charger subgoals
+diff --git a/charger_appo/training_utils.py b/charger_appo/training_utils.py
+index 1359f56..5bc2d7b 100644
+--- a/charger_appo/training_utils.py
++++ b/charger_appo/training_utils.py
+@@ -1,31 +1,97 @@
+-import json
+-from argparse import Namespace
++"""
++Charger APPO Training Utilities
+ 
++Provides functions for setting up and running charger APPO training.
++Follows the same pattern as follower training_utils for consistency.
++"""
++import os
++import json
+ import yaml
+-from sample_factory.cfg.arguments import parse_sf_args, parse_full_cfg
+-
+-from sample_factory.train import make_runner
+-from sample_factory.algo.utils.misc import ExperimentStatus
+-
+-import wandb
+-
+-from charger_appo.training_config import Experiment
++from argparse import Namespace
++from os.path import join
+ 
+ from sample_factory.utils.utils import log
+ 
++from charger_appo.register_training_utils import (
++    register_custom_model, 
++    register_msg_handlers,
++    log_model_summary,
++)
+ from charger_appo.register_env import register_custom_components
+-from charger_appo.register_training_utils import register_custom_model, register_msg_handlers
++from charger_appo.training_config import Experiment
+ 
+ 
+-def create_sf_config(exp: Experiment):
+-    custom_argv = [f'--env={exp.env}', f'--device={exp.device}']
++def create_sf_config(experiment_cfg: Experiment) -> Namespace:
++    """
++    Convert Experiment config to Sample Factory config.
++    
++    This function follows the same pattern as follower training_utils.
++    
++    Args:
++        experiment_cfg: Pydantic Experiment configuration
++        
++    Returns:
++        Namespace object compatible with Sample Factory
++    """
++    from sample_factory.cfg.arguments import parse_sf_args, parse_full_cfg
++    
++    # First create a minimal config to initialize Sample Factory parser
++    custom_argv = [f'--env={experiment_cfg.env}']
+     parser, partial_cfg = parse_sf_args(argv=custom_argv, evaluation=False)
+-    parser.set_defaults(**exp.dict())
++    
++    # Set defaults from experiment config
++    parser.set_defaults(**experiment_cfg.dict())
+     final_cfg = parse_full_cfg(parser, argv=custom_argv)
++    
++    # Register custom components
++    register_custom_components(experiment_cfg.environment.env)
++    register_custom_model()
++    
++    # Handle follower_checkpoint path - convert relative path to absolute
++    if hasattr(final_cfg, 'follower_checkpoint') and final_cfg.follower_checkpoint:
++        checkpoint_path = final_cfg.follower_checkpoint
++        # If path is relative, make it absolute relative to project root
++        if not os.path.isabs(checkpoint_path):
++            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++            checkpoint_path = os.path.join(project_root, checkpoint_path)
++            final_cfg.follower_checkpoint = checkpoint_path
++        
++        log.info(f"Using follower checkpoint: {final_cfg.follower_checkpoint}")
++        
++        # Validate checkpoint path
++        if os.path.isdir(checkpoint_path):
++            config_path = join(checkpoint_path, 'config.json')
++            if not os.path.exists(config_path):
++                log.warning(f"config.json not found in follower checkpoint: {checkpoint_path}")
++            else:
++                log.info(f"Found follower config at {config_path}")
++        elif os.path.isfile(checkpoint_path):
++            log.info(f"Using follower checkpoint file: {checkpoint_path}")
++        else:
++            log.warning(f"Follower checkpoint not found: {checkpoint_path}")
++    
++    if hasattr(final_cfg, 'freeze_follower_encoder') and final_cfg.freeze_follower_encoder:
++        log.info("Follower encoder will be frozen")
++    
++    log.info(f"Charge threshold: {getattr(final_cfg, 'charge_threshold', 0.3)}")
++    log.info(f"Charger intrinsic reward: {getattr(final_cfg, 'charger_intrinsic_reward', 0.01)}")
++    
+     return final_cfg
+ 
+ 
+ def run(config=None):
++    """
++    Run charger APPO training.
++    
++    This function follows the same pattern as follower training_utils.run()
++    
++    Args:
++        config: Configuration dictionary or None (will load from argparse)
++    """
++    from sample_factory.algo.utils.misc import ExperimentStatus
++    import wandb
++    
++    # Register custom model first
+     register_custom_model()
+ 
+     if config is None:
+@@ -40,7 +106,7 @@ def run(config=None):
+                             help='raw json config', required=False)
+ 
+         parser.add_argument('--wandb_thread_mode', type=bool, action='store', default=False,
+-                            help='Run wandb in thread mode. Usefull for some setups.', required=False)
++                            help='Run wandb in thread mode.', required=False)
+ 
+         params = parser.parse_args()
+         if params.raw_config:
+@@ -62,21 +128,134 @@ def run(config=None):
+     register_custom_components(env_name)
+ 
+     log.info(flat_config)
+-    # for local debug only
+-    if exp.train_for_env_steps == 1_000_000:
++
++    # Disable wandb for short runs or if not configured
++    if exp.train_for_env_steps == 1_000_000 or exp.train_for_env_steps <= 1000:
+         exp.use_wandb = False
+ 
+     if exp.use_wandb:
+-        import os
+         if params.wandb_thread_mode:
+             os.environ["WANDB_START_METHOD"] = "thread"
+-        wandb.init(project='Charger', config=exp.dict(), save_code=False, sync_tensorboard=True,
+-                   anonymous="allow", job_type=exp.environment.env, group='appo')
++        try:
++            wandb.init(
++                project='Charger-APPO', 
++                config=exp.dict(), 
++                save_code=False, 
++                sync_tensorboard=True,
++                anonymous="allow", 
++                job_type=exp.environment.env, 
++                group='train'
++            )
++        except Exception as e:
++            log.warning(f"Failed to initialize wandb: {e}. Disabling wandb.")
++            exp.use_wandb = False
+ 
++    # Create runner using sample_factory's make_runner
++    from sample_factory.train import make_runner
+     flat_config, runner = make_runner(create_sf_config(exp))
+     register_msg_handlers(flat_config, runner)
++    
++    # Log model summary after initialization
++    if hasattr(runner, 'algo') and hasattr(runner.algo, 'actor_critic'):
++        model = runner.algo.actor_critic
++        log_model_summary(model)
++        
++        # Load follower weights if checkpoint is provided
++        if hasattr(flat_config, 'follower_checkpoint') and flat_config.follower_checkpoint:
++            log.info(f"Loading follower weights from: {flat_config.follower_checkpoint}")
++            load_follower_weights_into_charger(model, flat_config.follower_checkpoint, flat_config.device)
++            
++            # Freeze encoder if requested
++            if hasattr(flat_config, 'freeze_follower_encoder') and flat_config.freeze_follower_encoder:
++                log.info("Freezing encoder parameters...")
++                if hasattr(model, 'encoder'):
++                    for param in model.encoder.parameters():
++                        param.requires_grad = False
++                    model.encoder.eval()
++    
+     status = runner.init()
+     if status == ExperimentStatus.SUCCESS:
+         status = runner.run()
+ 
+     return status
++
++
++def load_follower_weights_into_charger(
++    charger_model, 
++    follower_checkpoint_path: str,
++    device='cpu'
++):
++    """
++    Load follower weights into charger model.
++    
++    This function:
++    1. Finds the latest checkpoint in the follower directory
++    2. Extracts encoder weights from the checkpoint
++    3. Loads weights into the charger model's encoder
++    
++    Args:
++        charger_model: ChargerActorCritic model
++        follower_checkpoint_path: Path to follower checkpoint directory
++        device: Device to load checkpoint to
++    """
++    import torch
++    import glob
++    
++    if not os.path.exists(follower_checkpoint_path):
++        log.warning(f"Follower checkpoint not found: {follower_checkpoint_path}")
++        return False
++    
++    # Find checkpoint file if path is a directory
++    original_path = follower_checkpoint_path
++    if os.path.isdir(follower_checkpoint_path):
++        checkpoints = glob.glob(os.path.join(follower_checkpoint_path, 'checkpoint_p0', 'checkpoint_*'))
++        if not checkpoints:
++            checkpoints = glob.glob(os.path.join(follower_checkpoint_path, '*.pt'))
++        if checkpoints:
++            checkpoints.sort()
++            follower_checkpoint_path = checkpoints[-1]
++            log.info(f"Using latest follower checkpoint: {follower_checkpoint_path}")
++        else:
++            log.warning(f"No checkpoint files found in {original_path}")
++            return False
++    
++    try:
++        checkpoint = torch.load(follower_checkpoint_path, map_location=device, weights_only=False)
++        
++        # Extract model state dict
++        if 'model' in checkpoint:
++            state_dict = checkpoint['model']
++        elif 'actor_critic' in checkpoint:
++            state_dict = checkpoint['actor_critic']
++        else:
++            state_dict = checkpoint
++        
++        # Extract encoder weights (keys starting with 'encoder.')
++        encoder_weights = {}
++        for key, value in state_dict.items():
++            if key.startswith('encoder.'):
++                new_key = key[8:]  # Remove 'encoder.' prefix
++                encoder_weights[new_key] = value
++        
++        if not encoder_weights:
++            log.warning(f"No encoder weights found in {follower_checkpoint_path}")
++            return False
++        
++        # Load into encoder with strict=False to handle channel differences
++        if hasattr(charger_model, 'encoder'):
++            result = charger_model.encoder.load_state_dict(encoder_weights, strict=False)
++            log.info(f"Loaded follower encoder weights: {len(encoder_weights)} keys")
++            if result.missing_keys:
++                log.debug(f"Missing keys: {len(result.missing_keys)}")
++            if result.unexpected_keys:
++                log.debug(f"Unexpected keys: {len(result.unexpected_keys)}")
++            return True
++        else:
++            log.warning("Model has no encoder attribute")
++            return False
++            
++    except Exception as e:
++        log.warning(f"Failed to load follower weights: {e}")
++        import traceback
++        log.debug(traceback.format_exc())
++        return False
+diff --git a/charger_appo_example.py b/charger_appo_example.py
+index 78bdecd..94c2d12 100644
+--- a/charger_appo_example.py
++++ b/charger_appo_example.py
+@@ -1,107 +1,149 @@
++"""
++Charger APPO Example
++
++Example script demonstrating how to use the charger policy for inference.
++
++Usage:
++    python charger_appo_example.py \
++        --path_to_weights=experiments/train_dir/charger_appo \
++        --num_agents=64
++"""
+ import argparse
++import numpy as np
+ 
++from charger_appo.training_config import EnvironmentMazes, DecMAPFConfig
++from charger_appo.inference import ChargerAppoInferenceConfig, ChargerAppoInference
++from charger_appo.preprocessing import wrap_preprocessors, PreprocessorConfig
+ from env.create_env import create_env_base
+-from env.custom_maps import MAPS_REGISTRY
+-from utils.eval_utils import run_episode
+-from charger_appo.training_config import EnvironmentMazes
+-from charger_appo.inference import chargerAppoInferenceConfig, chargerAppoInference
+-from charger_appo.preprocessing import charger_appo_preprocessor
+ 
+ 
+-def create_custom_env(cfg):
++def create_env(cfg):
+     """
+     Creates a custom environment for charger_appo with battery and charger support.
+-    
+-    Args:
+-        cfg: Configuration object with environment parameters
+-        
+-    Returns:
+-        gymnasium.Env: Configured environment
+     """
+-    env_cfg = EnvironmentMazes(with_animation=cfg.animation)
+-    env_cfg.grid_config.num_agents = cfg.num_agents
+-    env_cfg.grid_config.num_charges = cfg.num_charges
+-    env_cfg.grid_config.map_name = cfg.map_name
+-    env_cfg.grid_config.seed = cfg.seed
+-    env_cfg.grid_config.max_episode_steps = cfg.max_episode_steps
+-    return create_env_base(env_cfg)
++    env_cfg = cfg.environment.grid_config
++    
++    # Enable battery and charger features
++    env_cfg.initial_battery = 100
++    env_cfg.battery_decrement = 1
++    env_cfg.charge_increment = 3
++    env_cfg.num_charges = max(1, cfg.environment.grid_config.num_agents // 16)
++    
++    env = create_env_base(cfg.environment)
++    
++    # Wrap with preprocessing
++    preprocessor_cfg = PreprocessorConfig(
++        network_input_radius=cfg.environment.grid_config.obs_radius,
++        charge_threshold=cfg.preprocessing.charge_threshold,
++        charger_intrinsic_reward=cfg.preprocessing.charger_intrinsic_reward,
++    )
++    env = wrap_preprocessors(env, config=preprocessor_cfg, auto_reset=False)
++    
++    return env
+ 
+ 
+-def run_charger_appo(env, path_to_weights='model/charger_appo', device='cpu'):
++def run_charger_appo(env, path_to_weights='model/charger_appo', device='cpu', num_steps=100):
+     """
+     Runs charger_appo algorithm on the given environment.
+     
+     Args:
+-        env: The environment to run
+-        path_to_weights: Path to trained model weights
+-        device: Device to run inference on ('cpu' or 'cuda')
+-        
+-    Returns:
+-        ResultsHolder: Episode results
++        env: Environment to run inference on
++        path_to_weights: Path to model weights
++        device: Device to run inference on
++        num_steps: Number of steps to run
+     """
+-    charger_cfg = chargerAppoInferenceConfig(path_to_weights=path_to_weights, device=device)
+-    algo = chargerAppoInference(charger_cfg)
+-
+-    env = charger_appo_preprocessor(env, charger_cfg)
+-
+-    return run_episode(env, algo)
++    # Create inference engine
++    charger_cfg = ChargerAppoInferenceConfig(
++        path_to_weights=path_to_weights,
++        device=device,
++    )
++    algo = ChargerAppoInference(charger_cfg)
++    
++    # Reset environment
++    observations, _ = env.reset(seed=42)
++    
++    total_reward = 0
++    success_count = 0
++    charger_visits = 0
++    
++    for step in range(num_steps):
++        # Get actions
++        actions = algo.act(observations, deterministic=True)
++        
++        # Step environment
++        observations, rewards, terminated, truncated, infos = env.step(actions)
++        total_reward += sum(rewards)
++        
++        # Count charger visits (agents at charger positions)
++        for obs in observations:
++            if obs['xy'] in obs.get('charges_xy', []):
++                charger_visits += 1
++        
++        # Check if all agents are done
++        if all(terminated) or all(truncated):
++            success_count += sum(1 for info in infos if info.get('success', False))
++            observations, _ = env.reset()
++    
++    print(f"\n=== Evaluation Results ===")
++    print(f"Total reward: {total_reward:.2f}")
++    print(f"Success rate: {success_count / num_steps * 100:.1f}%")
++    print(f"Charger visits: {charger_visits}")
++    
++    return total_reward
+ 
+ 
+ def main():
+     parser = argparse.ArgumentParser(description='Charger APPO Inference Script')
+-    parser.add_argument('--animation', action='store_false', help='Enable animation (default: %(default)s)')
+-    parser.add_argument('--num_agents', type=int, default=64, help='Number of agents (default: %(default)d)')
+-    parser.add_argument('--num_charges', type=int, default=16, help='Number of charges (default: %(default)d')
+-    parser.add_argument('--seed', type=int, default=0, help='Random seed (default: %(default)d)')
+-    parser.add_argument('--map_name', type=str, default='wfi_warehouse', help='Map name (default: %(default)s)')
+-    parser.add_argument('--max_episode_steps', type=int, default=128,
+-                        help='Maximum episode steps (default: %(default)d)')
+-    parser.add_argument('--show_map_names', action='store_true', help='Shows names of all available maps')
+-
+-    parser.add_argument('--path_to_weights', type=str, default='model/charger_appo',
+-                        help='Path to trained model weights (default: %(default)s)')
+-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'],
+-                        help='Device to run inference on (default: %(default)s)')
+-    parser.add_argument('--test', action='store_true',
+-                        help='Run in test mode without loading pre-trained weights')
+-
++    parser.add_argument(
++        '--path_to_weights', 
++        type=str, 
++        default='model/charger_appo',
++        help='Path to model weights'
++    )
++    parser.add_argument(
++        '--device', 
++        type=str, 
++        default='cpu',
++        help='Device for inference'
++    )
++    parser.add_argument(
++        '--num_steps', 
++        type=int, 
++        default=100,
++        help='Number of steps to run'
++    )
++    parser.add_argument(
++        '--num_agents', 
++        type=int, 
++        default=64,
++        help='Number of agents'
++    )
++    parser.add_argument(
++        '--charge_threshold', 
++        type=float, 
++        default=0.3,
++        help='Battery threshold for charger seeking'
++    )
++    
+     args = parser.parse_args()
+-
+-    if args.show_map_names:
+-        print("Available maps:")
+-        for map_ in sorted(MAPS_REGISTRY.keys()):
+-            print(f"  {map_}")
+-        return
+-
++    
++    # Create environment configuration
++    cfg = EnvironmentMazes()
++    cfg.grid_config.num_agents = args.num_agents
++    cfg.grid_config.obs_radius = 5
++    
++    print(f"Creating environment with {args.num_agents} agents...")
++    env = create_env(cfg)
++    
+     print(f"Running charger_appo evaluation...")
+-    print(f"  Map: {args.map_name}")
+-    print(f"  Agents: {args.num_agents}")
+-    print(f"  Seed: {args.seed}")
+-    print(f"  Max steps: {args.max_episode_steps}")
+-    print(f"  Device: {args.device}")
+-    print()
+-
+-    env = create_custom_env(args)
++    results = run_charger_appo(
++        env, 
++        path_to_weights=args.path_to_weights, 
++        device=args.device,
++        num_steps=args.num_steps
++    )
+     
+-    if args.test:
+-        print("Test mode: Running with random actions...")
+-        from utils.eval_utils import ResultsHolder
+-        obs, _ = env.reset(seed=args.seed)
+-        results = ResultsHolder()
+-        for step in range(args.max_episode_steps):
+-            import numpy as np
+-            actions = [np.random.randint(0, 5) for _ in range(args.num_agents)]
+-            obs, rew, dones, tr, infos = env.step(actions)
+-            results.after_step(infos)
+-            if all(dones) or all(tr):
+-                break
+-        print("\nTest episode completed!")
+-        print("Results:", results.get_final())
+-    else:
+-        results = run_charger_appo(env, path_to_weights=args.path_to_weights, device=args.device)
+-        print("Episode Results:")
+-        for key, value in results.items():
+-            print(f"  {key}: {value}")
++    print(f"\nEvaluation complete!")
+ 
+ 
+ if __name__ == '__main__':
+diff --git a/charger_mappo/README.md b/charger_mappo/README.md
+deleted file mode 100644
+index a53571d..0000000
+--- a/charger_mappo/README.md
++++ /dev/null
+@@ -1,179 +0,0 @@
+-# Charger MAPPO Implementation
+-
+-**MAPPO (Multi-Agent PPO)** with **CTDE (Centralized Training with Decentralized Execution)** architecture for charger-aware multi-agent navigation.
+-
+-## Key Features
+-
+-### CTDE Architecture
+-
+-**Training (Centralized):**
+-- **Actor**: Uses local observations (5-channel CNN) → action
+-- **Critic**: Uses global state (MLP) → value
+-  - Global obstacles map
+-  - All agents' positions
+-  - All charger positions
+-  - All agents' battery levels
+-  
+-**Execution (Decentralized):**
+-- **Actor only**: Uses local observations
+-- **Critic not needed**
+-
+-### Architecture Comparison
+-
+-| Component        | charger_appo (APPO) | charger_mappo (MAPPO)     |
+-| ---------------- | ------------------- | ------------------------- |
+-| **Encoder**      | Single CNN          | **Dual-path (CNN + MLP)** |
+-| **Actor Input**  | Local obs           | Local obs (same)          |
+-| **Critic Input** | Local obs           | **Global state**          |
+-| **Training**     | Decentralized       | **Centralized**           |
+-| **Execution**    | Decentralized       | Decentralized             |
+-
+-## Implementation
+-
+-### MAPPOEncoder with CTDE Routing
+-
+-```python
+-# charger_mappo/model.py
+-class MAPPOEncoder(Encoder):
+-    def __init__(self, cfg, obs_space):
+-        # Actor: CNN for local observations
+-        self.actor_conv_head = nn.Sequential(...)
+-        
+-        # Critic: MLP for global state
+-        self.critic_mlp = nn.Sequential(...)
+-    
+-    def forward(self, x):
+-        # CTDE routing: different paths for actor and critic
+-        if 'global_state' in x:
+-            # Critic path: use global state
+-            return self.critic_mlp(x['global_state'])
+-        else:
+-            # Actor path: use local observations
+-            return self.actor_conv_head(x['obs'])
+-```
+-
+-### Global State Construction
+-
+-```python
+-# charger_mappo/preprocessing.py
+-class GlobalStateWrapper(ObservationWrapper):
+-    def _get_global_state(self):
+-        # 1. Global obstacles
+-        global_obstacles = self.env.get_global_obstacles()
+-        
+-        # 2. All agents' positions (one-hot)
+-        agents_xy = self.env.get_global_agents_xy()
+-        agent_map = np.zeros_like(global_obstacles)
+-        for x, y in agents_xy:
+-            agent_map[x, y] = 1.0
+-        
+-        # 3. All chargers' positions
+-        charges_xy = self.env.get_global_charges_xy()
+-        charger_map = np.zeros_like(global_obstacles)
+-        for x, y in charges_xy:
+-            charger_map[x, y] = 1.0
+-        
+-        # 4. All agents' battery
+-        batteries = self.env.get_agents_battery()
+-        
+-        # Concatenate
+-        return np.concatenate([
+-            global_obstacles.flatten(),
+-            agent_map.flatten(),
+-            charger_map.flatten(),
+-            batteries / 100.0
+-        ])
+-```
+-
+-## Model Architecture
+-
+-### Actor Path (Local Observations)
+-```
+-Input: {'obs': (batch, 5, 11, 11)}
+-       └─ 5 channels: obstacles, agents, charges, target, battery
+-
+-ResNet:
+-  Conv2d(5, 64) → ResBlock × 1 → ReLU
+-  
+-Output: (batch, 7744)
+-```
+-
+-### Critic Path (Global State)
+-```
+-Input: {'global_state': (batch, 3136)}
+-       └─ 3136 = 32×32×3 (maps) + 64 (agents' battery)
+-
+-MLP:
+-  Linear(3136, 256) → ReLU → Linear(256, 128) → ReLU
+-  
+-Output: (batch, 128)
+-```
+-
+-## Usage
+-
+-### Training
+-
+-```bash
+-# MAPPO training with centralized critic
+-python train_charger_mappo.py \
+-    --num_agents=64 \
+-    --map_name=mazes-s0 \
+-    --train_for_env_steps=10000000
+-```
+-
+-### Evaluation
+-
+-```bash
+-# Decentralized execution (actor only)
+-python charger_mappo_example.py \
+-    --path_to_weights=model/charger_mappo \
+-    --num_agents=64 \
+-    --map_name=mazes-s0
+-```
+-
+-## How CTDE Works in SampleFactory
+-
+-SampleFactory's ActorCritic calls the encoder twice:
+-
+-```python
+-# Simplified ActorCritic forward
+-def forward(self, obs_dict):
+-    # Actor path
+-    actor_features = self.encoder(obs_dict)  # Uses 'obs'
+-    actions = self.actor_head(actor_features)
+-    
+-    # Critic path  
+-    critic_features = self.encoder(obs_dict)  # Uses 'global_state'
+-    values = self.critic_head(critic_features)
+-```
+-
+-Our `MAPPOEncoder.forward()` routes to the appropriate path based on which key is accessed:
+-- Actor context: accesses `obs_dict['obs']` → CNN path
+-- Critic context: accesses `obs_dict['global_state']` → MLP path
+-
+-## Benefits of MAPPO CTDE
+-
+-1. **Better Credit Assignment**: Critic sees which agents contributed to success
+-2. **Improved Coordination**: Global info helps learn cooperative charging strategies
+-3. **Scalable Execution**: Same decentralized execution as independent agents
+-4. **Charger Awareness**: Critic learns global charger usage patterns
+-
+-## Files
+-
+-```
+-charger_mappo/
+-├── model.py
+-│   └── MAPPOEncoder      # Dual-path encoder (CTDE routing)
+-├── preprocessing.py
+-│   └── GlobalStateWrapper  # Adds global_state
+-├── register_training_utils.py
+-│   └── make_custom_encoder # Registers MAPPOEncoder
+-└── ...
+-```
+-
+-## Requirements
+-
+-- Python 3.8+
+-- PyTorch
+-- Sample Factory
+-- Pogema (with battery/charger support)
+diff --git a/charger_mappo/inference.py b/charger_mappo/inference.py
+deleted file mode 100644
+index ee97846..0000000
+--- a/charger_mappo/inference.py
++++ /dev/null
+@@ -1,198 +0,0 @@
+-from pogema_toolbox.algorithm_config import AlgoBase
+-
+-from charger_mappo.preprocessing import PreprocessorConfig
+-# noinspection PyUnresolvedReferences
+-from utils import fix_num_threads_issue
+-
+-import json
+-from copy import deepcopy
+-
+-from charger_mappo.training_config import Experiment
+-from charger_mappo.register_env import register_custom_components
+-
+-import os
+-from argparse import Namespace
+-from collections import OrderedDict
+-from os.path import join
+-
+-import numpy as np
+-
+-from typing import Optional
+-
+-try:
+-    from typing import Literal
+-except ImportError:
+-    from typing_extensions import Literal
+-
+-import torch
+-from sample_factory.utils.utils import log
+-from pydantic import Extra, validator
+-
+-from sample_factory.algo.learning.learner import Learner
+-from sample_factory.model.actor_critic import create_actor_critic
+-from sample_factory.model.model_utils import get_rnn_size
+-from sample_factory.algo.utils.make_env import make_env_func_batched
+-from sample_factory.utils.attr_dict import AttrDict
+-from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
+-
+-from charger_mappo.register_training_utils import register_custom_model
+-
+-
+-class chargerMappoInferenceConfig(AlgoBase, extra=Extra.forbid):
+-    """
+-    Configuration class for charger_mappo inference.
+-
+-    Attributes:
+-    -----------
+-    name : Literal['charger_mappo']
+-        Name of the agent.
+-    path_to_weights : str
+-        Path to the weights file.
+-    preprocessing: PreprocessorConfig
+-        Preprocessing configuration.
+-    override_config: Optional[dict]
+-        Override configuration for the model.
+-    training_config: Optional[Experiment]
+-        Training configuration.
+-    custom_path_to_weights: Optional[str]
+-        Custom path to weights file.
+-    """
+-    name: Literal['charger_mappo'] = 'charger_mappo'
+-
+-    path_to_weights: str = "model/charger_mappo"
+-    preprocessing: PreprocessorConfig = PreprocessorConfig()
+-    override_config: Optional[dict] = None
+-    training_config: Optional[Experiment] = None
+-    custom_path_to_weights: Optional[str] = None
+-
+-    @classmethod
+-    def recursive_dict_update(cls, original_dict, update_dict):
+-        for key, value in update_dict.items():
+-            if key in original_dict and isinstance(original_dict[key], dict) and isinstance(value, dict):
+-                cls.recursive_dict_update(original_dict[key], value)
+-            else:
+-                if key not in original_dict:
+-                    raise ValueError(f"Key '{key}' does not exist in the original training config.")
+-                original_dict[key] = value
+-
+-    @validator('training_config', always=True, pre=True)
+-    def load_training_config(cls, _, values, ):
+-        with open(join(values['path_to_weights'], 'config.json'), "r") as f:
+-            field_value = json.load(f)
+-        if values.get('override_config') is not None:
+-            cls.recursive_dict_update(field_value, deepcopy(values['override_config']))
+-        return field_value
+-
+-
+-class chargerMappoInference:
+-    """
+-    Inference class for charger_mappo algorithm.
+-    
+-    Note: During inference, only local observations are used (decentralized execution).
+-    """
+-
+-    def __init__(self, config):
+-
+-        self.algo_cfg: chargerMappoInferenceConfig = config
+-        device = config.device
+-
+-        register_custom_model()
+-        self.path = config.path_to_weights
+-
+-        with open(join(self.path, 'config.json'), "r") as f:
+-            flat_config = json.load(f)
+-            self.exp = Experiment(**flat_config)
+-            flat_config = Namespace(**flat_config)
+-        env_name = self.exp.environment.env
+-        register_custom_components(env_name)
+-        config = flat_config
+-
+-        config.num_envs = 1
+-
+-        env = make_env_func_batched(config, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0))
+-        actor_critic = create_actor_critic(config, env.observation_space, env.action_space)
+-        actor_critic.eval()
+-        env.close()
+-
+-        if device != 'cpu' and not torch.cuda.is_available():
+-            os.environ['OMP_NUM_THREADS'] = str(1)
+-            os.environ['MKL_NUM_THREADS'] = str(1)
+-            device = torch.device('cpu')
+-            torch.set_num_threads(1)
+-            torch.set_num_interop_threads(1)
+-            log.warning('CUDA is not available, using CPU. This might be slow.')
+-
+-        actor_critic.model_to_device(device)
+-        name_prefix = dict(latest="checkpoint", best="best")['latest']
+-        policy_index = 0 if 'policy_index' not in flat_config else flat_config.policy_index
+-
+-        checkpoints = Learner.get_checkpoints(os.path.join(self.path, f"checkpoint_p{policy_index}"),
+-                                              f"{name_prefix}_*")
+-
+-        if self.algo_cfg.custom_path_to_weights:
+-            checkpoints = [self.algo_cfg.custom_path_to_weights]
+-
+-        checkpoint_dict = Learner.load_checkpoint(checkpoints, device)
+-        actor_critic.load_state_dict(checkpoint_dict['model'])
+-        log.info(f'Loaded {str(checkpoints)}')
+-
+-        self.net = actor_critic
+-        self.device = device
+-        self.cfg = config
+-
+-        self.rnn_states = None
+-
+-    def act(self, observations):
+-        self.rnn_states = torch.zeros([len(observations), get_rnn_size(self.cfg)], dtype=torch.float32,
+-                                      device=self.device) if self.rnn_states is None else self.rnn_states
+-
+-        obs = AttrDict(self.transform_dict_observations(observations))
+-        with torch.no_grad():
+-            policy_outputs = self.net(prepare_and_normalize_obs(self.net, obs), self.rnn_states)
+-
+-        self.rnn_states = policy_outputs['new_rnn_states']
+-        return policy_outputs['actions'].cpu().numpy()
+-
+-    def reset_states(self):
+-        torch.manual_seed(self.algo_cfg.seed)
+-        self.rnn_states = None
+-
+-    @staticmethod
+-    def count_parameters(model):
+-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+-
+-    def get_model_parameters(self):
+-        return self.count_parameters(self.net)
+-
+-    @staticmethod
+-    def transform_dict_observations(observations):
+-        """Transform list of dict observations into a dict of lists."""
+-        obs_dict = dict()
+-        if isinstance(observations[0], (dict, OrderedDict)):
+-            for key in observations[0].keys():
+-                if not isinstance(observations[0][key], str):
+-                    obs_dict[key] = [o[key] for o in observations]
+-        else:
+-            obs_dict['obs'] = observations
+-
+-        for key, x in obs_dict.items():
+-            obs_dict[key] = np.stack(x)
+-
+-        return obs_dict
+-
+-    def to_onnx(self, filename='charger_mappo.onnx'):
+-        self.net.eval()
+-        r = self.algo_cfg.training_config.preprocessing.network_input_radius
+-        log.info(f"Saving model with network_input_radius = {r}")
+-        d = 2 * r + 1
+-        obs_example = torch.rand(1, 5, d, d, device=self.device)
+-        rnn_example = torch.rand(1, 1, device=self.device)
+-        with torch.no_grad():
+-            q = self.net({'obs': obs_example}, rnn_example)
+-            print(q)
+-        input_names = ['obs', 'rnn_state']
+-        output_names = ['values', 'action_logits', 'log_prob_actions', 'actions', 'new_rnn_states']
+-
+-        torch.onnx.export(self.net, ({'obs': obs_example}, rnn_example), filename,
+-                          input_names=input_names, output_names=output_names,
+-                          export_params=True)
+diff --git a/charger_mappo/model.py b/charger_mappo/model.py
+deleted file mode 100644
+index 7de9123..0000000
+--- a/charger_mappo/model.py
++++ /dev/null
+@@ -1,188 +0,0 @@
+-from argparse import Namespace
+-from typing import Literal, Tuple
+-
+-import torch
+-from pydantic import BaseModel
+-from sample_factory.model.encoder import Encoder
+-from sample_factory.utils.typing import Config, ObsSpace
+-from sample_factory.algo.utils.torch_utils import calc_num_elements
+-
+-from sample_factory.utils.utils import log
+-
+-from torch import nn as nn
+-from gymnasium.spaces import Box
+-
+-
+-class EncoderConfig(BaseModel):
+-    """
+-    Configuration for encoder.
+-    
+-    For MAPPO:
+-    - Actor uses local observations (5-channel CNN)
+-    - Critic uses global state (MLP for centralized training)
+-    """
+-    extra_fc_layers: int = 0
+-    num_filters: int = 64
+-    num_res_blocks: int = 1
+-    activation_func: Literal['ReLU', 'ELU', 'Mish'] = 'ReLU'
+-    hidden_size: int = 128
+-    # Critic specific
+-    critic_hidden_layers: Tuple[int, ...] = (256, 128)
+-
+-
+-def activation_func(cfg: EncoderConfig) -> nn.Module:
+-    if cfg.activation_func == "ELU":
+-        return nn.ELU(inplace=True)
+-    elif cfg.activation_func == "ReLU":
+-        return nn.ReLU(inplace=True)
+-    elif cfg.activation_func == "Mish":
+-        return nn.Mish(inplace=True)
+-    else:
+-        raise Exception("Unknown activation_func")
+-
+-
+-class ResBlock(nn.Module):
+-    def __init__(self, cfg: EncoderConfig, input_ch, output_ch):
+-        super().__init__()
+-
+-        layers = [
+-            activation_func(cfg),
+-            nn.Conv2d(input_ch, output_ch, kernel_size=3, stride=1, padding=1),
+-            activation_func(cfg),
+-            nn.Conv2d(output_ch, output_ch, kernel_size=3, stride=1, padding=1),
+-        ]
+-
+-        self.res_block_core = nn.Sequential(*layers)
+-
+-    def forward(self, x):
+-        identity = x
+-        out = self.res_block_core(x)
+-        out = out + identity
+-        return out
+-
+-
+-class MAPPOEncoder(Encoder):
+-    """
+-    MAPPO Encoder with CTDE architecture.
+-    
+-    Actor path: Uses local observations (5-channel CNN)
+-    Critic path: Uses global state (MLP for centralized training)
+-    
+-    The forward method automatically routes to the appropriate path based on
+-    the input:
+-    - If 'global_state' is present and we're in critic context, use MLP
+-    - Otherwise, use CNN for actor
+-    """
+-
+-    def __init__(self, cfg: Config, obs_space: ObsSpace):
+-        super().__init__(cfg)
+-        self.encoder_cfg: EncoderConfig = EncoderConfig(**cfg.encoder)
+-
+-        # Actor encoder (CNN for local observations)
+-        input_ch = obs_space['obs'].shape[0]
+-        resnet_conf = [[self.encoder_cfg.num_filters, self.encoder_cfg.num_res_blocks]]
+-        curr_input_channels = input_ch
+-        layers = []
+-
+-        for out_channels, res_blocks in resnet_conf:
+-            layers.extend([nn.Conv2d(curr_input_channels, out_channels, kernel_size=3, stride=1, padding=1)])
+-            layers.extend([ResBlock(self.encoder_cfg, out_channels, out_channels) for _ in range(res_blocks)])
+-            curr_input_channels = out_channels
+-
+-        layers.append(activation_func(self.encoder_cfg))
+-        self.actor_conv_head = nn.Sequential(*layers)
+-        self.actor_out_size = calc_num_elements(self.actor_conv_head, obs_space['obs'].shape)
+-
+-        if self.encoder_cfg.extra_fc_layers:
+-            self.actor_extra_linear = nn.Sequential(
+-                nn.Linear(self.actor_out_size, self.encoder_cfg.hidden_size),
+-                activation_func(self.encoder_cfg),
+-            )
+-            self.actor_out_size = self.encoder_cfg.hidden_size
+-
+-        # Critic encoder (MLP for global state)
+-        if 'global_state' in obs_space:
+-            global_state_dim = obs_space['global_state'].shape[0]
+-        else:
+-            global_state_dim = 3136  # Fallback
+-        
+-        critic_layers = []
+-        prev_size = global_state_dim
+-        hidden_layers = self.encoder_cfg.critic_hidden_layers
+-        for hidden_size in hidden_layers:
+-            critic_layers.extend([
+-                nn.Linear(prev_size, hidden_size),
+-                activation_func(self.encoder_cfg),
+-            ])
+-            prev_size = hidden_size
+-        
+-        self.critic_mlp = nn.Sequential(*critic_layers)
+-        self.critic_out_size = prev_size
+-        
+-        # Use the larger of the two for compatibility with SampleFactory
+-        self.encoder_out_size = max(self.actor_out_size, self.critic_out_size)
+-
+-        log.debug('MAPPO Encoder - Actor out: %d, Critic out: %d', 
+-                  self.actor_out_size, self.critic_out_size)
+-
+-    def get_out_size(self) -> int:
+-        return self.encoder_out_size
+-
+-    def forward(self, x):
+-        """
+-        Forward pass with CTDE routing.
+-        
+-        In SampleFactory's ActorCritic:
+-        - Actor forward: processes 'obs' for action distribution
+-        - Critic forward: processes 'global_state' for value estimation
+-        
+-        The key insight is that SampleFactory calls the encoder twice:
+-        once for actor, once for critic, with the same observation dict.
+-        We route based on which features are being accessed.
+-        """
+-        # Check if we have global_state (critic path)
+-        has_global_state = 'global_state' in x and x['global_state'] is not None
+-        
+-        if has_global_state:
+-            # Critic path: use global state
+-            global_state = x['global_state']
+-            if global_state.dim() > 2:
+-                global_state = global_state.view(global_state.size(0), -1)
+-            x = self.critic_mlp(global_state)
+-        else:
+-            # Actor path: use local observations
+-            x = x['obs']
+-            x = self.actor_conv_head(x)
+-            x = x.contiguous().view(-1, self.actor_out_size)
+-            
+-            if self.encoder_cfg.extra_fc_layers and hasattr(self, 'actor_extra_linear'):
+-                x = self.actor_extra_linear(x)
+-        
+-        return x
+-
+-
+-# For backward compatibility
+-ResnetEncoder = ActorEncoder = MAPPOEncoder
+-CriticEncoder = MAPPOEncoder
+-
+-
+-def main():
+-    exp_cfg = {'encoder': EncoderConfig().dict()}
+-    r = 5
+-    
+-    # Test Actor path (local obs)
+-    obs = torch.rand(2, 5, r * 2 + 1, r * 2 + 1)
+-    enc = MAPPOEncoder(Namespace(**exp_cfg), dict(obs=obs[0], global_state=torch.rand(3136)))
+-    
+-    # Actor forward (no global_state)
+-    actor_out = enc({'obs': obs})
+-    print('Actor path output shape:', actor_out.shape)
+-    
+-    # Critic forward (with global_state)
+-    global_state = torch.rand(2, 3136)
+-    critic_out = enc({'obs': obs, 'global_state': global_state})
+-    print('Critic path output shape:', critic_out.shape)
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/charger_mappo/planning.py b/charger_mappo/planning.py
+deleted file mode 100644
+index 0aa004b..0000000
+--- a/charger_mappo/planning.py
++++ /dev/null
+@@ -1,81 +0,0 @@
+-from pogema import GridConfig
+-
+-# noinspection PyUnresolvedReferences
+-import cppimport.import_hook
+-# noinspection PyUnresolvedReferences
+-from follower_cpp.planner import planner
+-
+-from pydantic import BaseModel
+-
+-try:
+-    from typing import Literal
+-except ImportError:
+-    from typing_extensions import Literal
+-
+-
+-class PlannerConfig(BaseModel):
+-    use_static_cost: bool = True
+-    use_dynamic_cost: bool = True
+-    reset_dynamic_cost: bool = True
+-
+-
+-class Planner:
+-    def __init__(self, cfg: PlannerConfig):
+-        self.planner = None
+-        self.obstacles = None
+-        self.starts = None
+-        self.cfg = cfg
+-
+-    def add_grid_obstacles(self, obstacles, starts):
+-        self.obstacles = obstacles
+-        self.starts = starts
+-        self.planner = None
+-
+-    def update(self, obs):
+-        num_agents = len(obs)
+-        obs_radius = len(obs[0]['obstacles']) // 2
+-        
+-        if self.planner is None and self.obstacles is not None:
+-            self.planner = [planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost) for _ in range(num_agents)]
+-            for i, p in enumerate(self.planner):
+-                if self.starts and i < len(self.starts):
+-                    p.set_abs_start(self.starts[i])
+-            if self.cfg.use_static_cost:
+-                pen_calc = planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost)
+-                penalties = pen_calc.precompute_penalty_matrix(obs_radius)
+-                for p in self.planner:
+-                    p.set_penalties(penalties)
+-
+-        for k in range(num_agents):
+-            if obs[k]['xy'] == obs[k]['target_xy']:
+-                continue
+-            
+-            # Always plan to target - let the model decide whether to go to charger
+-            target = obs[k]['target_xy']
+-            
+-            if self.planner and self.planner[k] is not None:
+-                obs[k]['agents'][obs_radius][obs_radius] = 0
+-                self.planner[k].update_occupations(obs[k]['agents'], (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), target)
+-                obs[k]['agents'][obs_radius][obs_radius] = 1
+-                self.planner[k].update_path(obs[k]['xy'], target)
+-
+-    def get_path(self):
+-        results = []
+-        for idx in range(len(self.planner)) if self.planner else range(0):
+-            results.append(self.planner[idx].get_path())
+-        return results
+-
+-
+-class ResettablePlanner:
+-    def __init__(self, cfg: PlannerConfig):
+-        self._cfg = cfg
+-        self._agent = None
+-
+-    def update(self, observations):
+-        return self._agent.update(observations)
+-
+-    def get_path(self):
+-        return self._agent.get_path()
+-
+-    def reset_states(self, ):
+-        self._agent = Planner(self._cfg)
+diff --git a/charger_mappo/preprocessing.py b/charger_mappo/preprocessing.py
+deleted file mode 100644
+index 1541039..0000000
+--- a/charger_mappo/preprocessing.py
++++ /dev/null
+@@ -1,324 +0,0 @@
+-import numpy as np
+-import gymnasium
+-from gymnasium import ObservationWrapper
+-from gymnasium.spaces import Box, Dict
+-
+-from charger_mappo.planning import ResettablePlanner, PlannerConfig
+-
+-
+-class PreprocessorConfig(PlannerConfig):
+-    network_input_radius: int = 5
+-    intrinsic_target_reward: float = 0.01
+-
+-
+-def charger_mappo_preprocessor(env, algo_config):
+-    env = wrap_preprocessors(env, algo_config.training_config.preprocessing)
+-    return env
+-
+-
+-def wrap_preprocessors(env, config: PreprocessorConfig, auto_reset=False):
+-    env = charger_mappoWrapper(env=env, config=config)
+-    env = CutObservationWrapper(env, target_observation_radius=config.network_input_radius)
+-    env = ConcatPositionalFeatures(env)
+-    # Add global state wrapper for MAPPO critic (centralized training)
+-    env = GlobalStateWrapper(env)
+-    if auto_reset:
+-        env = AutoResetWrapper(env)
+-    return env
+-
+-
+-class charger_mappoWrapper(ObservationWrapper):
+-
+-    def __init__(self, env, config: PreprocessorConfig):
+-        super().__init__(env)
+-        self._cfg: PreprocessorConfig = config
+-        self.re_plan = ResettablePlanner(self._cfg)
+-        self.prev_goals = None
+-        self.intrinsic_reward = None
+-        self.battery_scale = None
+-        
+-        obs_space = self.observation_space
+-        full_size = obs_space['obstacles'].shape[0]
+-        obs_space['charges'] = Box(0.0, 1.0, shape=(full_size, full_size))
+-        obs_space['target'] = Box(0.0, 1.0, shape=(full_size, full_size))
+-        obs_space['battery'] = Box(0.0, 1.0, shape=(full_size, full_size))
+-
+-    @staticmethod
+-    def get_relative_xy(x, y, tx, ty, obs_radius):
+-        dx, dy = x - tx, y - ty
+-        if dx > obs_radius or dx < -obs_radius or dy > obs_radius or dy < -obs_radius:
+-            return None, None
+-        return obs_radius - dx, obs_radius - dy
+-
+-    def observation(self, observations):
+-        if self.battery_scale is None and len(observations) > 0:
+-            initial_battery = observations[0].get('battery', 100)
+-            self.battery_scale = initial_battery if isinstance(initial_battery, (int, float)) else initial_battery[0] if hasattr(initial_battery, '__len__') else 100
+-        
+-        self.re_plan.update(observations)
+-        paths = self.re_plan.get_path()
+-
+-        new_goals = []
+-        intrinsic_rewards = [0.0] * len(observations)
+-
+-        for k, obs in enumerate(observations):
+-            path = paths[k] if k < len(paths) else None
+-
+-            if path is None:
+-                new_goals.append(obs['target_xy'])
+-                path = []
+-            else:
+-                subgoal_achieved = self.prev_goals and obs['xy'] == self.prev_goals[k]
+-                intrinsic_rewards[k] = self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
+-                new_goals.append(path[1])
+-
+-            obs['obstacles'][obs['obstacles'] > 0] *= -1
+-
+-            r = obs['obstacles'].shape[0] // 2
+-            for idx, (gx, gy) in enumerate(path):
+-                x, y = self.get_relative_xy(*obs['xy'], gx, gy, r)
+-                if x is not None and y is not None:
+-                    obs['obstacles'][x, y] = 1.0
+-                else:
+-                    break
+-            
+-            obs['charges'] = np.zeros_like(obs['obstacles'])
+-            for cx, cy in obs.get('charges_xy', []):
+-                x, y = self.get_relative_xy(*obs['xy'], cx, cy, r)
+-                if x is not None and y is not None:
+-                    obs['charges'][x, y] = 1.0
+-            
+-            obs['target'] = np.zeros_like(obs['obstacles'])
+-            tx, ty = obs['target_xy']
+-            x, y = self.get_relative_xy(*obs['xy'], tx, ty, r)
+-            if x is not None and y is not None:
+-                obs['target'][x, y] = 1.0
+-            
+-            battery = obs.get('battery', self.battery_scale)
+-            battery_val = battery if isinstance(battery, (int, float)) else battery[0] if hasattr(battery, '__len__') else self.battery_scale
+-            obs['battery'] = np.full_like(obs['obstacles'], battery_val / self.battery_scale, dtype=np.float32)
+-            
+-        self.prev_goals = new_goals
+-        self.intrinsic_reward = intrinsic_rewards
+-
+-        return observations
+-
+-    def get_intrinsic_rewards(self, reward):
+-        for agent_idx, r in enumerate(reward):
+-            reward[agent_idx] = self.intrinsic_reward[agent_idx]
+-        return reward
+-
+-    def step(self, action):
+-        observation, reward, done, tr, info = self.env.step(action)
+-        return self.observation(observation), self.get_intrinsic_rewards(reward), done, tr, info
+-
+-    def reset_state(self):
+-        self.re_plan.reset_states()
+-        self.battery_scale = None
+-        if hasattr(self, 'get_global_obstacles'):
+-            self.re_plan._agent.add_grid_obstacles(self.get_global_obstacles(), self.get_global_agents_xy())
+-        else:
+-            self.re_plan._agent.add_grid_obstacles(None, None)
+-
+-    def reset(self, **kwargs):
+-        observations, infos = self.env.reset(**kwargs)
+-        self.reset_state()
+-        return self.observation(observations), infos
+-
+-
+-class CutObservationWrapper(ObservationWrapper):
+-    def __init__(self, env, target_observation_radius):
+-        super().__init__(env)
+-        self._target_obs_radius = target_observation_radius
+-        self._initial_obs_radius = self.env.observation_space['obstacles'].shape[0] // 2
+-
+-        for key, value in self.observation_space.items():
+-            d = self._initial_obs_radius * 2 + 1
+-            if value.shape == (d, d):
+-                r = self._target_obs_radius
+-                self.observation_space[key] = Box(0.0, 1.0, shape=(r * 2 + 1, r * 2 + 1))
+-
+-    def observation(self, observations):
+-        tr = self._target_obs_radius
+-        ir = self._initial_obs_radius
+-        d = ir * 2 + 1
+-
+-        for obs in observations:
+-            for key, value in obs.items():
+-                if hasattr(value, 'shape') and value.shape == (d, d):
+-                    obs[key] = value[ir - tr:ir + tr + 1, ir - tr:ir + tr + 1]
+-
+-        return observations
+-
+-
+-class ConcatPositionalFeatures(ObservationWrapper):
+-
+-    def __init__(self, env):
+-        super().__init__(env)
+-        self.to_concat = []
+-
+-        observation_space = Dict()
+-        full_size = self.env.observation_space['obstacles'].shape[0]
+-
+-        for key, value in self.observation_space.items():
+-            if value.shape == (full_size, full_size):
+-                self.to_concat.append(key)
+-            else:
+-                observation_space[key] = value
+-
+-        obs_shape = (len(self.to_concat), full_size, full_size)
+-        observation_space['obs'] = Box(0.0, 1.0, shape=obs_shape)
+-        self.to_concat.sort(key=self.key_comparator)
+-        self.observation_space = observation_space
+-
+-    def observation(self, observations):
+-        for agent_idx, obs in enumerate(observations):
+-            main_obs = np.concatenate([obs[key][None] for key in self.to_concat])
+-            for key in self.to_concat:
+-                del obs[key]
+-
+-            for key in obs:
+-                obs[key] = np.array(obs[key], dtype=np.float32)
+-            observations[agent_idx]['obs'] = main_obs.astype(np.float32)
+-        return observations
+-
+-    @staticmethod
+-    def key_comparator(x):
+-        if x == 'obstacles':
+-            return '0_' + x
+-        elif 'agents' in x:
+-            return '1_' + x
+-        elif x == 'charges':
+-            return '2_' + x
+-        elif x == 'target':
+-            return '3_' + x
+-        elif x == 'battery':
+-            return '4_' + x
+-        return '5_' + x
+-
+-
+-class GlobalStateWrapper(ObservationWrapper):
+-    """
+-    MAPPO: Adds global state for centralized critic training.
+-    
+-    Critic receives global state:
+-    - Global obstacles map
+-    - All agents' positions
+-    - All chargers' positions  
+-    - All agents' battery levels
+-    
+-    Actor uses only local observations (5-channel).
+-    """
+-    
+-    def __init__(self, env):
+-        super().__init__(env)
+-        self._global_obs = None
+-        self._num_agents = 1
+-        
+-        # Try to get grid dimensions
+-        try:
+-            if hasattr(env, 'get_global_obstacles'):
+-                global_obs = env.get_global_obstacles()
+-                if global_obs is not None:
+-                    h, w = np.array(global_obs).shape
+-                else:
+-                    h, w = 32, 32
+-            else:
+-                h, w = 32, 32
+-        except:
+-            h, w = 32, 32
+-        
+-        self._grid_h, self._grid_w = h, w
+-        
+-        # Global state will be added after reset when we know num_agents
+-        self._global_state_shape = None
+-
+-    def _get_global_state(self):
+-        """Build global state from environment."""
+-        try:
+-            if hasattr(self.env, 'get_global_obstacles'):
+-                global_obstacles = np.array(self.env.get_global_obstacles())
+-            else:
+-                global_obstacles = np.zeros((self._grid_h, self._grid_w))
+-            
+-            if hasattr(self.env, 'get_global_agents_xy'):
+-                agents_xy = self.env.get_global_agents_xy()
+-            else:
+-                agents_xy = []
+-            
+-            if hasattr(self.env, 'get_global_charges_xy'):
+-                charges_xy = self.env.get_global_charges_xy()
+-            else:
+-                charges_xy = []
+-            
+-            # Get battery - try multiple methods
+-            batteries = [100] * self._num_agents
+-            try:
+-                if hasattr(self.env, 'get_agents_battery'):
+-                    batteries = self.env.get_agents_battery()
+-                elif hasattr(self.env, 'grid') and hasattr(self.env.grid, 'get_battery'):
+-                    batteries = self.env.grid.get_battery()
+-            except:
+-                pass
+-            
+-            # Normalize
+-            global_obstacles_norm = global_obstacles.astype(np.float32)
+-            
+-            agent_map = np.zeros_like(global_obstacles_norm)
+-            for x, y in agents_xy:
+-                if 0 <= x < global_obstacles_norm.shape[0] and 0 <= y < global_obstacles_norm.shape[1]:
+-                    agent_map[x, y] = 1.0
+-            
+-            charger_map = np.zeros_like(global_obstacles_norm)
+-            for x, y in charges_xy:
+-                if 0 <= x < global_obstacles_norm.shape[0] and 0 <= y < global_obstacles_norm.shape[1]:
+-                    charger_map[x, y] = 1.0
+-            
+-            batteries_norm = np.array([b / 100.0 for b in batteries], dtype=np.float32)
+-            
+-            global_state = np.concatenate([
+-                global_obstacles_norm.flatten(),
+-                agent_map.flatten(),
+-                charger_map.flatten(),
+-                batteries_norm
+-            ]).astype(np.float32)
+-            
+-            return global_state
+-        except Exception as e:
+-            # Fallback: return zeros
+-            fallback_size = self._grid_h * self._grid_w * 3 + self._num_agents
+-            return np.zeros(fallback_size, dtype=np.float32)
+-
+-    def observation(self, observations):
+-        # Update num_agents
+-        self._num_agents = len(observations)
+-        
+-        # Get global state
+-        global_state = self._get_global_state()
+-        
+-        # Update observation space if needed
+-        if self._global_state_shape is None:
+-            self._global_state_shape = global_state.shape
+-            self.observation_space.spaces['global_state'] = Box(
+-                low=-1.0, high=1.0, shape=self._global_state_shape, dtype=np.float32
+-            )
+-        
+-        # Add to each observation
+-        for obs in observations:
+-            obs['global_state'] = global_state.copy()
+-        
+-        return observations
+-
+-    def reset(self, **kwargs):
+-        observations, infos = self.env.reset(**kwargs)
+-        self._num_agents = len(observations)
+-        observations = self.observation(observations)
+-        return observations, infos
+-
+-
+-class AutoResetWrapper(gymnasium.Wrapper):
+-    def step(self, action):
+-        observations, rewards, terminated, truncated, infos = self.env.step(action)
+-        if all(terminated) or all(truncated):
+-            observations, _ = self.env.reset()
+-        return observations, rewards, terminated, truncated, infos
+diff --git a/charger_mappo/register_env.py b/charger_mappo/register_env.py
+deleted file mode 100644
+index 26b1f06..0000000
+--- a/charger_mappo/register_env.py
++++ /dev/null
+@@ -1,97 +0,0 @@
+-import numpy as np
+-from sample_factory.utils.typing import Env
+-from sample_factory.envs.env_utils import register_env
+-
+-from env.create_env import create_env_base
+-from charger_mappo.training_config import Experiment
+-
+-import gymnasium
+-from charger_mappo.training_config import Environment
+-from charger_mappo.preprocessing import PreprocessorConfig, wrap_preprocessors
+-
+-
+-def create_env(environment_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
+-    env = create_env_base(environment_cfg)
+-    env = wrap_preprocessors(env, config=preprocessing_cfg, auto_reset=True)
+-    return env
+-
+-
+-class MultiEnv(gymnasium.Wrapper):
+-    def __init__(self, env_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
+-        if env_cfg.target_num_agents is None:
+-            self.envs = [create_env(env_cfg, preprocessing_cfg)]
+-        else:
+-            assert env_cfg.target_num_agents % env_cfg.grid_config.num_agents == 0, \
+-                "Target num charger_mappo must be divisible by num agents"
+-            num_envs = env_cfg.target_num_agents // env_cfg.grid_config.num_agents
+-            self.envs = [create_env(env_cfg, preprocessing_cfg) for _ in range(num_envs)]
+-
+-        super().__init__(self.envs[0])
+-
+-    def step(self, actions):
+-        obs, rewards, dones, truncated, infos = [], [], [], [], []
+-        last_agents = 0
+-        for env in self.envs:
+-            env_num_agents = env.get_num_agents()
+-            action = actions[last_agents: last_agents + env_num_agents]
+-            last_agents = last_agents + env_num_agents
+-            o, r, d, t, i = env.step(action)
+-            obs += o
+-            rewards += r
+-            dones += d
+-            truncated += t
+-            infos += i
+-        return obs, rewards, dones, truncated, infos
+-
+-    def reset(self, seed, **kwargs):
+-        obs = []
+-        for idx, env in enumerate(self.envs):
+-            inner_seed = seed + idx
+-            o, _ = env.reset(seed=inner_seed, **kwargs)
+-            obs += o
+-        return obs, {}
+-
+-    def sample_actions(self):
+-        actions = []
+-        for env in self.envs:
+-            actions += list(env.sample_actions())
+-        return np.array(actions)
+-
+-    @property
+-    def num_agents(self):
+-        return sum([env.get_num_agents() for env in self.envs])
+-
+-    def render(self):
+-        for q in self.envs:
+-            q.render()
+-
+-
+-def make_env(full_env_name, cfg=None, env_config=None, render_mode=None):
+-    p_config = Experiment(**vars(cfg))
+-    environment_config = p_config.environment
+-    preprocessing_config = p_config.preprocessing
+-    # todo make this code simpler
+-
+-    if environment_config.agent_bins is not None and environment_config.target_num_agents is not None:
+-        if environment_config.env_id is None:
+-            num_agents = environment_config.agent_bins[0]
+-        else:
+-            num_agents = environment_config.agent_bins[environment_config.env_id % len(environment_config.agent_bins)]
+-        environment_config.grid_config.num_agents = num_agents
+-
+-        return MultiEnv(environment_config, preprocessing_config)
+-    return create_env(environment_config, preprocessing_config)
+-
+-
+-class CustomEnv:
+-    def make_env(self, env_name, cfg, env_config, render_mode) -> Env:
+-        return make_env(env_name, cfg, env_config, render_mode)
+-
+-
+-def register_pogema_envs(env_name):
+-    env_factory = CustomEnv()
+-    register_env(env_name, env_factory.make_env)
+-
+-
+-def register_custom_components(env_name):
+-    register_pogema_envs(env_name)
+diff --git a/charger_mappo/register_training_utils.py b/charger_mappo/register_training_utils.py
+deleted file mode 100644
+index ab35c36..0000000
+--- a/charger_mappo/register_training_utils.py
++++ /dev/null
+@@ -1,66 +0,0 @@
+-from charger_mappo.model import ActorEncoder, CriticEncoder, EncoderConfig
+-
+-from sample_factory.algo.utils.context import global_model_factory
+-from sample_factory.utils.typing import ObsSpace, Config
+-from sample_factory.model.encoder import Encoder
+-from tensorboardX import SummaryWriter
+-from sample_factory.utils.typing import PolicyID
+-from sample_factory.algo.runners.runner import AlgoObserver, Runner
+-
+-import numpy as np
+-
+-from sample_factory.utils.utils import log
+-
+-
+-def pogema_extra_episodic_stats_processing(*args, **kwargs):
+-    pass
+-
+-
+-def pogema_extra_summaries(runner: Runner, policy_id: PolicyID, summary_writer: SummaryWriter, env_steps: int):
+-    policy_avg_stats = runner.policy_avg_stats
+-    for key in policy_avg_stats:
+-        if key in ['reward', 'len', 'true_reward', 'Done']:
+-            continue
+-
+-        avg = np.mean(np.array(policy_avg_stats[key][policy_id]))
+-        summary_writer.add_scalar(key, avg, env_steps)
+-        log.debug(f'{policy_id}-{key}: {round(float(avg), 3)}')
+-
+-
+-class CustomExtraSummariesObserver(AlgoObserver):
+-    def extra_summaries(self, runner: Runner, policy_id: PolicyID, writer: SummaryWriter, env_steps: int) -> None:
+-        pogema_extra_summaries(runner, policy_id, writer, env_steps)
+-
+-
+-def register_msg_handlers(cfg: Config, runner: Runner):
+-    runner.register_episodic_stats_handler(pogema_extra_episodic_stats_processing)
+-    runner.register_observer(CustomExtraSummariesObserver())
+-
+-
+-def make_custom_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
+-    """
+-    Factory function for MAPPO encoder.
+-    
+-    This encoder handles both:
+-    - Actor: uses 'obs' key (local observations)
+-    - Critic: uses 'global_state' key (centralized training)
+-    
+-    The encoder automatically routes to the appropriate sub-encoder based on
+-    the context (actor vs critic) determined by SampleFactory.
+-    """
+-    return ActorEncoder(cfg, obs_space)
+-
+-
+-def register_custom_model():
+-    """
+-    Register custom MAPPO encoder.
+-    
+-    MAPPO CTDE is implemented through:
+-    1. GlobalStateWrapper adds 'global_state' to observations
+-    2. ActorEncoder processes 'obs' for actor
+-    3. CriticEncoder processes 'global_state' for critic
+-    
+-    SampleFactory's ActorCritic will use the same encoder class, but
+-    the encoder's forward method receives different keys for actor vs critic.
+-    """
+-    global_model_factory().register_encoder_factory(make_custom_encoder)
+diff --git a/charger_mappo/training_config.py b/charger_mappo/training_config.py
+deleted file mode 100644
+index e73bfd9..0000000
+--- a/charger_mappo/training_config.py
++++ /dev/null
+@@ -1,102 +0,0 @@
+-from typing import Optional, Union
+-
+-from charger_mappo.model import EncoderConfig
+-from charger_mappo.preprocessing import PreprocessorConfig
+-
+-try:
+-    from typing import Literal
+-except ImportError:
+-    from typing_extensions import Literal
+-
+-from pogema import GridConfig
+-from pydantic import BaseModel
+-
+-
+-class DecMAPFConfig(GridConfig):
+-    integration: Literal['SampleFactory'] = 'SampleFactory'
+-    collision_system: Literal['priority', 'block_both', 'soft'] = 'soft'
+-    observation_type: Literal['POMAPF'] = 'POMAPF'
+-    auto_reset: Literal[False] = False
+-
+-    num_agents: int = 64
+-    obs_radius: int = 5
+-    max_episode_steps: int = 512
+-    map_name: str = '(wc3-[A-P]|sc1-[A-S]|sc1-TaleofTwoCities|street-[A-P]|mazes-s[0-9]_|mazes-s[1-3][0-9]_|random-s[0-9]_|random-s[1-3][0-9]_)'
+-
+-
+-class Environment(BaseModel, ):
+-    grid_config: DecMAPFConfig = DecMAPFConfig()
+-    env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+-    with_animation: bool = False
+-    worker_index: int = None
+-    vector_index: int = None
+-    env_id: int = None
+-    target_num_agents: Optional[int] = None
+-    agent_bins: Optional[list] = [64, 128, 256, 256]
+-    use_maps: bool = True
+-
+-    every_step_metrics: bool = False
+-
+-
+-class EnvironmentMazes(Environment):
+-    env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+-    use_maps: bool = True
+-    target_num_agents: Optional[int] = 256
+-    agent_bins: Optional[list] = [128, 256, 256, 256]
+-    grid_config: DecMAPFConfig = DecMAPFConfig(on_target='restart', max_episode_steps=512,
+-                                               map_name=r'mazes-.+')
+-
+-
+-class Experiment(BaseModel):
+-    environment: EnvironmentMazes = EnvironmentMazes()
+-    encoder: EncoderConfig = EncoderConfig()
+-    preprocessing: PreprocessorConfig = PreprocessorConfig()
+-
+-    rollout: int = 8
+-    num_workers: int = 4
+-
+-    recurrence: int = 8
+-    use_rnn: bool = False
+-    rnn_size: int = 256
+-
+-    ppo_clip_ratio: float = 0.1
+-    batch_size: int = 2048
+-
+-    exploration_loss_coeff: float = 0.018
+-    num_envs_per_worker: int = 4
+-    worker_num_splits: int = 1
+-    max_policy_lag: int = 1
+-
+-    force_envs_single_thread: bool = True
+-    optimizer: Literal["adam", "lamb"] = 'adam'
+-    restart_behavior: str = "overwrite"
+-    normalize_returns: bool = False
+-    async_rl: bool = False
+-    num_batches_per_epoch: int = 16
+-
+-    num_batches_to_accumulate: int = 1
+-    normalize_input: bool = False
+-    decoder_mlp_layers = []
+-    save_best_metric: str = "avg_throughput"
+-    value_bootstrap: bool = True
+-    save_milestones_sec: int = -1
+-
+-    keep_checkpoints: int = 1
+-    stats_avg: int = 10
+-    learning_rate: float = 0.000146
+-    train_for_env_steps: int = 1_000_000
+-
+-    gamma: float = 0.965
+-
+-    lr_schedule: str = 'kl_adaptive_minibatch'
+-
+-    experiment: str = 'exp'
+-    train_dir: str = 'experiments/train_dir/charger_mappo'
+-    seed: Optional[int] = 42
+-    use_wandb: bool = True
+-    device: str = 'cpu'
+-    env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
+-    
+-    # MAPPO specific: critic uses global state
+-    use_global_critic: bool = True
+-    global_critic_layers: list = [256, 128]
+diff --git a/charger_mappo/training_utils.py b/charger_mappo/training_utils.py
+deleted file mode 100644
+index fb9d41e..0000000
+--- a/charger_mappo/training_utils.py
++++ /dev/null
+@@ -1,85 +0,0 @@
+-import json
+-from argparse import Namespace
+-
+-import yaml
+-from sample_factory.cfg.arguments import parse_sf_args, parse_full_cfg
+-
+-from sample_factory.train import make_runner
+-from sample_factory.algo.utils.misc import ExperimentStatus
+-
+-import wandb
+-
+-from charger_mappo.training_config import Experiment
+-
+-from sample_factory.utils.utils import log
+-
+-from charger_mappo.register_env import register_custom_components
+-from charger_mappo.register_training_utils import register_custom_model, register_msg_handlers
+-
+-
+-def create_sf_config(exp: Experiment):
+-    custom_argv = [f'--env={exp.env}', f'--device={exp.device}']
+-    parser, partial_cfg = parse_sf_args(argv=custom_argv, evaluation=False)
+-    parser.set_defaults(**exp.dict())
+-    final_cfg = parse_full_cfg(parser, argv=custom_argv)
+-    return final_cfg
+-
+-
+-def run(config=None):
+-    register_custom_model()
+-
+-    if config is None:
+-        import argparse
+-
+-        parser = argparse.ArgumentParser(description='Process training config.')
+-
+-        parser.add_argument('--config_path', type=str, action="store", default='train-debug.yaml',
+-                            help='path to yaml file with single run configuration', required=False)
+-
+-        parser.add_argument('--raw_config', type=str, action='store',
+-                            help='raw json config', required=False)
+-
+-        parser.add_argument('--wandb_thread_mode', type=bool, action='store', default=False,
+-                            help='Run wandb in thread mode. Usefull for some setups.', required=False)
+-
+-        params = parser.parse_args()
+-        if params.raw_config:
+-            params.raw_config = params.raw_config.replace("\'", "\"")
+-            config = json.loads(params.raw_config)
+-        else:
+-            if params.config_path is None:
+-                raise ValueError("You should specify --config_path or --raw_config argument!")
+-            with open(params.config_path, "r") as f:
+-                config = yaml.safe_load(f)
+-    else:
+-        params = Namespace(**config)
+-        params.wandb_thread_mode = False
+-
+-    exp = Experiment(**config)
+-    flat_config = Namespace(**exp.dict())
+-    env_name = exp.environment.env
+-    log.debug(f'env_name = {env_name}')
+-    register_custom_components(env_name)
+-
+-    log.info(flat_config)
+-    # for local debug only
+-    if exp.train_for_env_steps == 1_000_000:
+-        exp.use_wandb = False
+-
+-    if exp.use_wandb:
+-        import os
+-        if params.wandb_thread_mode:
+-            os.environ["WANDB_START_METHOD"] = "thread"
+-        wandb.init(project='Charger', config=exp.dict(), save_code=False, sync_tensorboard=True,
+-                   anonymous="allow", job_type=exp.environment.env, group='mappo')
+-
+-    flat_config, runner = make_runner(create_sf_config(exp))
+-    register_msg_handlers(flat_config, runner)
+-    status = runner.init()
+-    if status == ExperimentStatus.SUCCESS:
+-        status = runner.run()
+-
+-    if exp.use_wandb:
+-        wandb.finish()
+-
+-    return status
+diff --git a/charger_mappo_example.py b/charger_mappo_example.py
+deleted file mode 100644
+index 170cd01..0000000
+--- a/charger_mappo_example.py
++++ /dev/null
+@@ -1,94 +0,0 @@
+-import argparse
+-
+-from env.create_env import create_env_base
+-from env.custom_maps import MAPS_REGISTRY
+-from utils.eval_utils import run_episode
+-from charger_mappo.training_config import EnvironmentMazes
+-from charger_mappo.inference import chargerMappoInferenceConfig, chargerMappoInference
+-from charger_mappo.preprocessing import charger_mappo_preprocessor
+-
+-
+-def create_custom_env(cfg):
+-    """
+-    Creates a custom environment for charger_mappo with battery and charger support.
+-    
+-    Args:
+-        cfg: Configuration object with environment parameters
+-        
+-    Returns:
+-        gymnasium.Env: Configured environment
+-    """
+-    env_cfg = EnvironmentMazes(with_animation=cfg.animation)
+-    env_cfg.grid_config.num_agents = cfg.num_agents
+-    env_cfg.grid_config.map_name = cfg.map_name
+-    env_cfg.grid_config.seed = cfg.seed
+-    env_cfg.grid_config.max_episode_steps = cfg.max_episode_steps
+-    # Enable battery and charger features
+-    env_cfg.grid_config.initial_battery = [100] * cfg.num_agents
+-    env_cfg.grid_config.battery_decrement = 1
+-    env_cfg.grid_config.charge_increment = 3
+-    env_cfg.grid_config.num_charges = max(1, cfg.num_agents // 16)  # ~1 charger per 16 agents
+-    return create_env_base(env_cfg)
+-
+-
+-def run_charger_mappo(env, path_to_weights='model/charger_mappo', device='cpu'):
+-    """
+-    Runs charger_mappo algorithm on the given environment.
+-    
+-    Args:
+-        env: The environment to run
+-        path_to_weights: Path to trained model weights
+-        device: Device to run inference on ('cpu' or 'cuda')
+-        
+-    Returns:
+-        ResultsHolder: Episode results
+-    """
+-    charger_cfg = chargerMappoInferenceConfig(path_to_weights=path_to_weights, device=device)
+-    algo = chargerMappoInference(charger_cfg)
+-
+-    env = charger_mappo_preprocessor(env, algo)
+-
+-    return run_episode(env, algo)
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(description='Charger MAPPO Inference Script')
+-    parser.add_argument('--animation', action='store_false', help='Enable animation (default: %(default)s)')
+-    parser.add_argument('--num_agents', type=int, default=64, help='Number of agents (default: %(default)d)')
+-    parser.add_argument('--seed', type=int, default=0, help='Random seed (default: %(default)d)')
+-    parser.add_argument('--map_name', type=str, default='mazes-s0', help='Map name (default: %(default)s)')
+-    parser.add_argument('--max_episode_steps', type=int, default=512,
+-                        help='Maximum episode steps (default: %(default)d)')
+-    parser.add_argument('--show_map_names', action='store_true', help='Shows names of all available maps')
+-
+-    parser.add_argument('--path_to_weights', type=str, default='model/charger_mappo',
+-                        help='Path to trained model weights (default: %(default)s)')
+-    parser.add_argument('--device', type=str, default='cpu', choices=['cpu', 'cuda'],
+-                        help='Device to run inference on (default: %(default)s)')
+-
+-    args = parser.parse_args()
+-
+-    if args.show_map_names:
+-        print("Available maps:")
+-        for map_ in sorted(MAPS_REGISTRY.keys()):
+-            print(f"  {map_}")
+-        return
+-
+-    print(f"Running charger_mappo evaluation...")
+-    print(f"  Map: {args.map_name}")
+-    print(f"  Agents: {args.num_agents}")
+-    print(f"  Seed: {args.seed}")
+-    print(f"  Max steps: {args.max_episode_steps}")
+-    print(f"  Device: {args.device}")
+-    print()
+-
+-    env = create_custom_env(args)
+-    results = run_charger_mappo(env, path_to_weights=args.path_to_weights, device=args.device)
+-
+-    print("Episode Results:")
+-    for key, value in results.items():
+-        print(f"  {key}: {value}")
+-
+-
+-if __name__ == '__main__':
+-    main()
+diff --git a/train_charger_appo.py b/train_charger_appo.py
+index 25f921b..6fb3326 100644
+--- a/train_charger_appo.py
++++ b/train_charger_appo.py
+@@ -1,3 +1,21 @@
++"""
++Charger APPO Training Script
++
++Train a charger policy that:
++1. Uses follower's encoder weights (frozen)
++2. Adds battery-aware target switching (goal vs charger)
++3. Processes scalar features (xy, target_xy, battery, charge_xy)
++
++Usage:
++    # Train from scratch
++    python train_charger_appo.py --train_dir=experiments/train_dir/charger_appo
++    
++    # Fine-tune from follower checkpoint
++    python train_charger_appo.py \
++        --follower_checkpoint=experiments/train_dir/follower/xxx \
++        --freeze_follower=True \
++        --charge_threshold=0.3
++"""
+ from sys import argv
+ 
+ from charger_appo.training_config import Experiment
+@@ -5,6 +23,7 @@ from charger_appo.training_utils import run, create_sf_config
+ 
+ 
+ def recursive_update(experiment: dict, key, value):
++    """Recursively update a nested dictionary."""
+     if key in experiment:
+         experiment[key] = value
+         return True
+@@ -17,6 +36,7 @@ def recursive_update(experiment: dict, key, value):
+ 
+ 
+ def update_dict(target_dict, keys, values):
++    """Update dictionary with provided keys and values."""
+     for key, value in zip(keys, values):
+         if recursive_update(target_dict, key, value):
+             print(f'Updated {key} to {value}')
+@@ -25,13 +45,13 @@ def update_dict(target_dict, keys, values):
+ 
+ 
+ def parse_args_to_items(argv_):
++    """Parse command line arguments into key-value pairs."""
+     keys = []
+     values = []
+ 
+     for arg in argv_[1:]:
+         key, value = arg.split('=')
+         key = key.replace('--', '')
+-
+         keys.append(key)
+         values.append(value)
+ 
+@@ -39,14 +59,29 @@ def parse_args_to_items(argv_):
+ 
+ 
+ def main():
++    """Main training entry point."""
+     experiment = Experiment()
+     experiment = create_sf_config(experiment).__dict__
+     keys, values = parse_args_to_items(list(argv))
+ 
+-    # check all args and replace them in experiment recursively
++    # Check all args and replace them in experiment recursively
+     update_dict(experiment, keys, values)
++    
++    # Print training configuration
++    print("\n" + "="*60)
++    print("Charger APPO Training Configuration")
++    print("="*60)
++    print(f"Follower checkpoint: {experiment.get('follower_checkpoint', 'None')}")
++    print(f"Freeze follower encoder: {experiment.get('freeze_follower_encoder', True)}")
++    print(f"Charge threshold: {experiment.get('charge_threshold', 0.3)}")
++    print(f"Charger intrinsic reward: {experiment.get('charger_intrinsic_reward', 0.01)}")
++    print(f"Use charger xy input: {experiment.get('use_charger_xy_input', True)}")
++    print(f"Train dir: {experiment.get('train_dir', 'experiments/train_dir/charger_appo')}")
++    print(f"Train steps: {experiment.get('train_for_env_steps', 1_000_000)}")
++    print("="*60 + "\n")
++    
+     run(config=experiment)
+ 
+ 
+ if __name__ == '__main__':
+-    main()
+\ No newline at end of file
++    main()
+diff --git a/train_charger_mappo.py b/train_charger_mappo.py
+deleted file mode 100644
+index ab42e8c..0000000
+--- a/train_charger_mappo.py
++++ /dev/null
+@@ -1,52 +0,0 @@
+-from sys import argv
+-
+-from charger_mappo.training_config import Experiment
+-from charger_mappo.training_utils import run, create_sf_config
+-
+-
+-def recursive_update(experiment: dict, key, value):
+-    if key in experiment:
+-        experiment[key] = value
+-        return True
+-    else:
+-        for k, v in experiment.items():
+-            if isinstance(v, dict):
+-                if recursive_update(v, key, value):
+-                    return True
+-        return False
+-
+-
+-def update_dict(target_dict, keys, values):
+-    for key, value in zip(keys, values):
+-        if recursive_update(target_dict, key, value):
+-            print(f'Updated {key} to {value}')
+-        else:
+-            raise KeyError(f'Could not find {key} in experiment')
+-
+-
+-def parse_args_to_items(argv_):
+-    keys = []
+-    values = []
+-
+-    for arg in argv_[1:]:
+-        key, value = arg.split('=')
+-        key = key.replace('--', '')
+-
+-        keys.append(key)
+-        values.append(value)
+-
+-    return keys, values
+-
+-
+-def main():
+-    experiment = Experiment()
+-    experiment = create_sf_config(experiment).__dict__
+-    keys, values = parse_args_to_items(list(argv))
+-
+-    # check all args and replace them in experiment recursively
+-    update_dict(experiment, keys, values)
+-    run(config=experiment)
+-
+-
+-if __name__ == '__main__':
+-    main()

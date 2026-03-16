@@ -1,3 +1,10 @@
+"""
+Charger APPO Planning
+
+Reuses the planner from follower. The key difference is in preprocessing
+where the target is dynamically switched between goal and charger based
+on battery level.
+"""
 from pogema import GridConfig
 
 # noinspection PyUnresolvedReferences
@@ -14,12 +21,15 @@ except ImportError:
 
 
 class PlannerConfig(BaseModel):
+    """Configuration for the planner."""
     use_static_cost: bool = True
     use_dynamic_cost: bool = True
     reset_dynamic_cost: bool = True
 
 
 class Planner:
+    """Path planner for multi-agent navigation."""
+    
     def __init__(self, cfg: PlannerConfig):
         self.planner = None
         self.obstacles = None
@@ -27,21 +37,36 @@ class Planner:
         self.cfg = cfg
 
     def add_grid_obstacles(self, obstacles, starts):
+        """Set global obstacles and agent start positions."""
         self.obstacles = obstacles
         self.starts = starts
         self.planner = None
 
     def update(self, obs):
+        """Update planner with current observations."""
         num_agents = len(obs)
         obs_radius = len(obs[0]['obstacles']) // 2
         
-        if self.planner is None and self.obstacles is not None:
-            self.planner = [planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost) for _ in range(num_agents)]
+        if self.planner is None:
+            self.planner = [
+                planner(
+                    self.obstacles, 
+                    self.cfg.use_static_cost, 
+                    self.cfg.use_dynamic_cost, 
+                    self.cfg.reset_dynamic_cost
+                ) 
+                for _ in range(num_agents)
+            ]
             for i, p in enumerate(self.planner):
-                if self.starts and i < len(self.starts):
-                    p.set_abs_start(self.starts[i])
+                p.set_abs_start(self.starts[i])
+            
             if self.cfg.use_static_cost:
-                pen_calc = planner(self.obstacles, self.cfg.use_static_cost, self.cfg.use_dynamic_cost, self.cfg.reset_dynamic_cost)
+                pen_calc = planner(
+                    self.obstacles, 
+                    self.cfg.use_static_cost, 
+                    self.cfg.use_dynamic_cost, 
+                    self.cfg.reset_dynamic_cost
+                )
                 penalties = pen_calc.precompute_penalty_matrix(obs_radius)
                 for p in self.planner:
                     p.set_penalties(penalties)
@@ -49,33 +74,38 @@ class Planner:
         for k in range(num_agents):
             if obs[k]['xy'] == obs[k]['target_xy']:
                 continue
-            
-            # Always plan to target - let the model decide whether to go to charger
-            target = obs[k]['target_xy']
-            
-            if self.planner and self.planner[k] is not None:
-                obs[k]['agents'][obs_radius][obs_radius] = 0
-                self.planner[k].update_occupations(obs[k]['agents'], (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), target)
-                obs[k]['agents'][obs_radius][obs_radius] = 1
-                self.planner[k].update_path(obs[k]['xy'], target)
+            obs[k]['agents'][obs_radius][obs_radius] = 0
+            self.planner[k].update_occupations(
+                obs[k]['agents'], 
+                (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), 
+                obs[k]['target_xy']
+            )
+            obs[k]['agents'][obs_radius][obs_radius] = 1
+            self.planner[k].update_path(obs[k]['xy'], obs[k]['target_xy'])
 
     def get_path(self):
+        """Get planned paths for all agents."""
         results = []
-        for idx in range(len(self.planner)) if self.planner else range(0):
+        for idx in range(len(self.planner)):
             results.append(self.planner[idx].get_path())
         return results
 
 
 class ResettablePlanner:
+    """Wrapper for planner that supports resetting."""
+    
     def __init__(self, cfg: PlannerConfig):
         self._cfg = cfg
         self._agent = None
 
     def update(self, observations):
+        """Update internal planner with observations."""
         return self._agent.update(observations)
 
     def get_path(self):
+        """Get paths from internal planner."""
         return self._agent.get_path()
 
-    def reset_states(self, ):
+    def reset_states(self):
+        """Reset the internal planner."""
         self._agent = Planner(self._cfg)

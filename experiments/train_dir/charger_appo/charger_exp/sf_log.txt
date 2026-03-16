@@ -1,0 +1,316 @@
+[2026-03-17 00:37:09,055][29344] Saving configuration to experiments/train_dir/charger_appo/charger_exp/config.json...
+[2026-03-17 00:37:09,077][29344] Rollout worker 0 uses device cpu
+[2026-03-17 00:37:09,077][29344] Rollout worker 1 uses device cpu
+[2026-03-17 00:37:09,078][29344] Rollout worker 2 uses device cpu
+[2026-03-17 00:37:09,078][29344] Rollout worker 3 uses device cpu
+[2026-03-17 00:37:09,078][29344] In synchronous mode, we only accumulate one batch. Setting num_batches_to_accumulate to 1
+[2026-03-17 00:37:09,155][29344] InferenceWorker_p0-w0: min num requests: 1
+[2026-03-17 00:37:09,173][29344] Starting all processes...
+[2026-03-17 00:37:09,173][29344] Starting process learner_proc0
+[2026-03-17 00:37:09,228][29344] Starting all processes...
+[2026-03-17 00:37:09,230][29344] Starting process inference_proc0-0
+[2026-03-17 00:37:09,230][29344] Starting process rollout_proc0
+[2026-03-17 00:37:09,231][29344] Starting process rollout_proc1
+[2026-03-17 00:37:09,231][29344] Starting process rollout_proc2
+[2026-03-17 00:37:09,232][29344] Starting process rollout_proc3
+[2026-03-17 00:37:10,541][29357] Setting fixed seed 42
+[2026-03-17 00:37:10,543][29357] Initializing actor-critic model on device cpu
+[2026-03-17 00:37:10,544][29357] Convolutional layer output size: 7744
+[2026-03-17 00:37:10,545][29357] Using latest follower checkpoint: model/follower/checkpoint_p0/checkpoint_000061056_1000341504.pth
+[2026-03-17 00:37:10,577][29357] Unexpected keys in encoder: ['extra_linear.0.weight', 'extra_linear.0.bias', 'conv_head.3.res_block_core.1.weight', 'conv_head.3.res_block_core.1.bias', 'conv_head.3.res_block_core.3.weight']...
+[2026-03-17 00:37:10,579][29357] Successfully loaded follower encoder weights from model/follower/checkpoint_p0/checkpoint_000061056_1000341504.pth
+[2026-03-17 00:37:10,580][29357] Encoder frozen (follower weights)
+[2026-03-17 00:37:10,582][29360] On MacOS, not setting affinity
+[2026-03-17 00:37:10,585][29357] Created Actor Critic model with architecture:
+[2026-03-17 00:37:10,585][29357] ActorCriticSharedWeights(
+  (obs_normalizer): ObservationNormalizer()
+  (encoder): ResnetEncoder(
+    (conv_head): Sequential(
+      (0): Conv2d(2, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+      (1): ResBlock(
+        (res_block_core): Sequential(
+          (0): ReLU(inplace=True)
+          (1): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+          (2): ReLU(inplace=True)
+          (3): Conv2d(64, 64, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1))
+        )
+      )
+      (2): ReLU(inplace=True)
+    )
+  )
+  (core): ModelCoreIdentity()
+  (decoder): MlpDecoder(
+    (mlp): Identity()
+  )
+  (critic_linear): Linear(in_features=7744, out_features=1, bias=True)
+  (action_parameterization): ActionParameterizationDefault(
+    (distribution_linear): Linear(in_features=7744, out_features=5, bias=True)
+  )
+)
+[2026-03-17 00:37:10,588][29357] Using optimizer <class 'torch.optim.adam.Adam'>
+[2026-03-17 00:37:10,591][29357] No checkpoints found
+[2026-03-17 00:37:10,594][29357] Did not load from checkpoint, starting from scratch!
+[2026-03-17 00:37:10,594][29357] Initialized policy 0 weights for model version 0
+[2026-03-17 00:37:10,594][29357] LearnerWorker_p0 finished initialization!
+[2026-03-17 00:37:10,598][29359] On MacOS, not setting affinity
+[2026-03-17 00:37:10,603][29362] On MacOS, not setting affinity
+[2026-03-17 00:37:10,612][29361] On MacOS, not setting affinity
+[2026-03-17 00:37:10,613][29358] Convolutional layer output size: 7744
+[2026-03-17 00:37:10,613][29358] Using latest follower checkpoint: model/follower/checkpoint_p0/checkpoint_000061056_1000341504.pth
+[2026-03-17 00:37:10,623][29358] Unexpected keys in encoder: ['extra_linear.0.weight', 'extra_linear.0.bias', 'conv_head.3.res_block_core.1.weight', 'conv_head.3.res_block_core.1.bias', 'conv_head.3.res_block_core.3.weight']...
+[2026-03-17 00:37:10,623][29358] Successfully loaded follower encoder weights from model/follower/checkpoint_p0/checkpoint_000061056_1000341504.pth
+[2026-03-17 00:37:10,624][29358] Encoder frozen (follower weights)
+[2026-03-17 00:37:10,626][29344] Inference worker 0-0 is ready!
+[2026-03-17 00:37:10,627][29344] All inference workers are ready! Signal rollout workers to start!
+[2026-03-17 00:37:11,407][29361] Decorrelating experience for 0 frames...
+[2026-03-17 00:37:11,413][29362] Decorrelating experience for 0 frames...
+[2026-03-17 00:37:11,420][29359] Decorrelating experience for 0 frames...
+[2026-03-17 00:37:11,434][29360] Decorrelating experience for 0 frames...
+[2026-03-17 00:37:11,879][29361] Decorrelating experience for 8 frames...
+[2026-03-17 00:37:11,882][29359] Decorrelating experience for 8 frames...
+[2026-03-17 00:37:11,891][29362] Decorrelating experience for 8 frames...
+[2026-03-17 00:37:11,892][29360] Decorrelating experience for 8 frames...
+[2026-03-17 00:37:12,485][29359] Decorrelating experience for 16 frames...
+[2026-03-17 00:37:12,493][29361] Decorrelating experience for 16 frames...
+[2026-03-17 00:37:12,533][29362] Decorrelating experience for 16 frames...
+[2026-03-17 00:37:12,541][29360] Decorrelating experience for 16 frames...
+[2026-03-17 00:37:13,220][29361] Decorrelating experience for 24 frames...
+[2026-03-17 00:37:13,250][29359] Decorrelating experience for 24 frames...
+[2026-03-17 00:37:13,306][29360] Decorrelating experience for 24 frames...
+[2026-03-17 00:37:13,314][29362] Decorrelating experience for 24 frames...
+[2026-03-17 00:37:13,364][29344] Fps is (10 sec: nan, 60 sec: nan, 300 sec: nan). Total num frames: 0. Throughput: 0: nan. Samples: 0. Policy #0 lag: (min: -1.0, avg: -1.0, max: -1.0)
+[2026-03-17 00:37:18,364][29344] Fps is (10 sec: 0.0, 60 sec: 0.0, 300 sec: 0.0). Total num frames: 0. Throughput: 0: 4301.0. Samples: 21504. Policy #0 lag: (min: -1.0, avg: -1.0, max: -1.0)
+[2026-03-17 00:37:23,366][29344] Fps is (10 sec: 0.0, 60 sec: 0.0, 300 sec: 0.0). Total num frames: 0. Throughput: 0: 3276.2. Samples: 32768. Policy #0 lag: (min: -1.0, avg: -1.0, max: -1.0)
+[2026-03-17 00:37:28,363][29344] Fps is (10 sec: 3277.0, 60 sec: 2184.7, 300 sec: 2184.7). Total num frames: 32768. Throughput: 0: 2184.7. Samples: 32768. Policy #0 lag: (min: 12.0, avg: 12.0, max: 12.0)
+[2026-03-17 00:37:29,146][29344] Heartbeat connected on Batcher_0
+[2026-03-17 00:37:29,150][29344] Heartbeat connected on LearnerWorker_p0
+[2026-03-17 00:37:29,163][29344] Heartbeat connected on RolloutWorker_w0
+[2026-03-17 00:37:29,169][29344] Heartbeat connected on RolloutWorker_w2
+[2026-03-17 00:37:29,170][29344] Heartbeat connected on RolloutWorker_w1
+[2026-03-17 00:37:29,176][29344] Heartbeat connected on RolloutWorker_w3
+[2026-03-17 00:37:29,721][29344] Heartbeat connected on InferenceWorker_p0-w0
+[2026-03-17 00:37:33,364][29344] Fps is (10 sec: 3277.6, 60 sec: 1638.4, 300 sec: 1638.4). Total num frames: 32768. Throughput: 0: 3072.1. Samples: 61440. Policy #0 lag: (min: 12.0, avg: 12.0, max: 12.0)
+[2026-03-17 00:37:38,366][29344] Fps is (10 sec: 0.0, 60 sec: 1310.6, 300 sec: 1310.6). Total num frames: 32768. Throughput: 0: 2621.2. Samples: 65536. Policy #0 lag: (min: 12.0, avg: 12.0, max: 12.0)
+[2026-03-17 00:37:43,365][29344] Fps is (10 sec: 3276.3, 60 sec: 2184.5, 300 sec: 2184.5). Total num frames: 65536. Throughput: 0: 2355.1. Samples: 70656. Policy #0 lag: (min: 7.0, avg: 7.0, max: 7.0)
+[2026-03-17 00:37:48,364][29344] Fps is (10 sec: 3277.7, 60 sec: 1872.5, 300 sec: 1872.5). Total num frames: 65536. Throughput: 0: 2808.7. Samples: 98304. Policy #0 lag: (min: 7.0, avg: 7.0, max: 7.0)
+[2026-03-17 00:37:53,366][29344] Fps is (10 sec: 0.0, 60 sec: 1638.3, 300 sec: 1638.3). Total num frames: 65536. Throughput: 0: 2457.5. Samples: 98304. Policy #0 lag: (min: 7.0, avg: 7.0, max: 7.0)
+[2026-03-17 00:37:58,363][29344] Fps is (10 sec: 3276.9, 60 sec: 2184.6, 300 sec: 2184.6). Total num frames: 98304. Throughput: 0: 2548.7. Samples: 114688. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:03,362][29344] Fps is (10 sec: 3278.2, 60 sec: 1966.2, 300 sec: 1966.2). Total num frames: 98304. Throughput: 0: 2434.9. Samples: 131072. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:08,366][29344] Fps is (10 sec: 3275.8, 60 sec: 2383.0, 300 sec: 2383.0). Total num frames: 131072. Throughput: 0: 2184.5. Samples: 131072. Policy #0 lag: (min: 2.0, avg: 2.0, max: 2.0)
+[2026-03-17 00:38:13,365][29344] Fps is (10 sec: 3275.8, 60 sec: 2184.5, 300 sec: 2184.5). Total num frames: 131072. Throughput: 0: 2753.3. Samples: 156672. Policy #0 lag: (min: 2.0, avg: 2.0, max: 2.0)
+[2026-03-17 00:38:18,366][29344] Fps is (10 sec: 0.0, 60 sec: 2184.5, 300 sec: 2016.4). Total num frames: 131072. Throughput: 0: 2275.5. Samples: 163840. Policy #0 lag: (min: 2.0, avg: 2.0, max: 2.0)
+[2026-03-17 00:38:23,366][29344] Fps is (10 sec: 3276.4, 60 sec: 2730.7, 300 sec: 2340.5). Total num frames: 163840. Throughput: 0: 2184.5. Samples: 163840. Policy #0 lag: (min: 10.0, avg: 10.0, max: 10.0)
+[2026-03-17 00:38:28,364][29344] Fps is (10 sec: 3277.4, 60 sec: 2184.5, 300 sec: 2184.5). Total num frames: 163840. Throughput: 0: 2799.0. Samples: 196608. Policy #0 lag: (min: 10.0, avg: 10.0, max: 10.0)
+[2026-03-17 00:38:33,363][29344] Fps is (10 sec: 3277.7, 60 sec: 2730.7, 300 sec: 2457.6). Total num frames: 196608. Throughput: 0: 2184.5. Samples: 196608. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:38,365][29344] Fps is (10 sec: 3276.4, 60 sec: 2730.7, 300 sec: 2313.0). Total num frames: 196608. Throughput: 0: 2548.7. Samples: 212992. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:43,366][29344] Fps is (10 sec: 0.0, 60 sec: 2184.5, 300 sec: 2184.5). Total num frames: 196608. Throughput: 0: 2548.5. Samples: 229376. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:48,364][29344] Fps is (10 sec: 3277.1, 60 sec: 2730.6, 300 sec: 2414.5). Total num frames: 229376. Throughput: 0: 2366.5. Samples: 237568. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:53,363][29344] Fps is (10 sec: 3277.7, 60 sec: 2730.8, 300 sec: 2293.8). Total num frames: 229376. Throughput: 0: 2912.9. Samples: 262144. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:38:58,363][29344] Fps is (10 sec: 0.0, 60 sec: 2184.6, 300 sec: 2184.6). Total num frames: 229376. Throughput: 0: 2343.9. Samples: 262144. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:03,366][29344] Fps is (10 sec: 3275.9, 60 sec: 2730.5, 300 sec: 2383.1). Total num frames: 262144. Throughput: 0: 2639.6. Samples: 282624. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:08,366][29344] Fps is (10 sec: 3275.6, 60 sec: 2184.5, 300 sec: 2279.5). Total num frames: 262144. Throughput: 0: 2912.7. Samples: 294912. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:11,937][29357] Saving experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000144_294912.pth...
+[2026-03-17 00:39:13,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.6, 300 sec: 2457.6). Total num frames: 294912. Throughput: 0: 2184.4. Samples: 294912. Policy #0 lag: (min: 1.0, avg: 1.0, max: 1.0)
+[2026-03-17 00:39:18,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.6, 300 sec: 2359.3). Total num frames: 294912. Throughput: 0: 2844.3. Samples: 324608. Policy #0 lag: (min: 1.0, avg: 1.0, max: 1.0)
+[2026-03-17 00:39:23,364][29344] Fps is (10 sec: 0.0, 60 sec: 2184.6, 300 sec: 2268.6). Total num frames: 294912. Throughput: 0: 2548.7. Samples: 327680. Policy #0 lag: (min: 1.0, avg: 1.0, max: 1.0)
+[2026-03-17 00:39:24,939][29358] Updated weights for policy 0, policy_version 160 (0.0002)
+[2026-03-17 00:39:28,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.6, 300 sec: 2427.2). Total num frames: 327680. Throughput: 0: 2366.6. Samples: 335872. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:33,365][29344] Fps is (10 sec: 3276.4, 60 sec: 2184.5, 300 sec: 2340.6). Total num frames: 327680. Throughput: 0: 2730.6. Samples: 360448. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:38,364][29344] Fps is (10 sec: 3277.6, 60 sec: 2730.7, 300 sec: 2485.9). Total num frames: 360448. Throughput: 0: 2184.5. Samples: 360448. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:43,366][29344] Fps is (10 sec: 3276.5, 60 sec: 2730.7, 300 sec: 2403.0). Total num frames: 360448. Throughput: 0: 2639.4. Samples: 380928. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:48,366][29344] Fps is (10 sec: 0.0, 60 sec: 2184.5, 300 sec: 2325.4). Total num frames: 360448. Throughput: 0: 2457.6. Samples: 393216. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:39:48,367][29344] Avg episode reward: [(0, '0.290')]
+[2026-03-17 00:39:48,367][29344] 0-true_objective: 0.29
+[2026-03-17 00:39:53,364][29344] Fps is (10 sec: 3277.5, 60 sec: 2730.6, 300 sec: 2457.6). Total num frames: 393216. Throughput: 0: 2184.6. Samples: 393216. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:39:53,365][29344] Avg episode reward: [(0, '0.080')]
+[2026-03-17 00:39:56,591][29360] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent)
+[2026-03-17 00:39:57,123][29361] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent)
+[2026-03-17 00:39:57,127][29362] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent)
+[2026-03-17 00:39:57,128][29359] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent)
+[2026-03-17 00:39:58,364][29344] Fps is (10 sec: 3277.4, 60 sec: 2730.6, 300 sec: 2383.1). Total num frames: 393216. Throughput: 0: 2843.1. Samples: 422845. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:39:58,365][29344] Avg episode reward: [(0, '0.062')]
+[2026-03-17 00:39:58,365][29344] 0-true_objective: 0.062
+[2026-03-17 00:40:03,364][29344] Fps is (10 sec: 0.0, 60 sec: 2184.6, 300 sec: 2313.0). Total num frames: 393216. Throughput: 0: 2251.2. Samples: 425906. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:40:03,365][29344] Avg episode reward: [(0, '0.062')]
+[2026-03-17 00:40:08,366][29344] Fps is (10 sec: 3276.2, 60 sec: 2730.7, 300 sec: 2434.2). Total num frames: 425984. Throughput: 0: 2363.4. Samples: 434038. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:40:08,367][29344] Avg episode reward: [(0, '0.046')]
+[2026-03-17 00:40:08,368][29344] 0-true_objective: 0.046
+[2026-03-17 00:40:13,366][29344] Fps is (10 sec: 3276.2, 60 sec: 2184.5, 300 sec: 2366.6). Total num frames: 425984. Throughput: 0: 2719.6. Samples: 458252. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:40:13,366][29344] Avg episode reward: [(0, '0.040')]
+[2026-03-17 00:40:18,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.7, 300 sec: 2479.7). Total num frames: 458752. Throughput: 0: 2173.4. Samples: 458252. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:40:18,366][29344] Avg episode reward: [(0, '0.107')]
+[2026-03-17 00:40:18,368][29344] 0-true_objective: 0.107
+[2026-03-17 00:40:23,364][29344] Fps is (10 sec: 3277.5, 60 sec: 2730.7, 300 sec: 2414.5). Total num frames: 458752. Throughput: 0: 2872.1. Samples: 489695. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:40:23,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:28,364][29344] Fps is (10 sec: 0.0, 60 sec: 2184.6, 300 sec: 2352.6). Total num frames: 458752. Throughput: 0: 2417.2. Samples: 489695. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:40:28,364][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:28,365][29344] 0-true_objective: 0.0
+[2026-03-17 00:40:33,362][29344] Fps is (10 sec: 3277.5, 60 sec: 2730.8, 300 sec: 2457.6). Total num frames: 491520. Throughput: 0: 2481.3. Samples: 504863. Policy #0 lag: (min: 8.0, avg: 8.0, max: 8.0)
+[2026-03-17 00:40:33,362][29344] Avg episode reward: [(0, '0.098')]
+[2026-03-17 00:40:38,364][29344] Fps is (10 sec: 3276.6, 60 sec: 2184.5, 300 sec: 2397.7). Total num frames: 491520. Throughput: 0: 2805.1. Samples: 519445. Policy #0 lag: (min: 8.0, avg: 8.0, max: 8.0)
+[2026-03-17 00:40:38,365][29344] Avg episode reward: [(0, '0.035')]
+[2026-03-17 00:40:38,366][29344] 0-true_objective: 0.035
+[2026-03-17 00:40:43,364][29344] Fps is (10 sec: 3276.2, 60 sec: 2730.8, 300 sec: 2496.6). Total num frames: 524288. Throughput: 0: 2146.7. Samples: 519445. Policy #0 lag: (min: 10.0, avg: 10.0, max: 10.0)
+[2026-03-17 00:40:43,364][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:48,364][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.8, 300 sec: 2438.5). Total num frames: 524288. Throughput: 0: 2676.0. Samples: 546327. Policy #0 lag: (min: 10.0, avg: 10.0, max: 10.0)
+[2026-03-17 00:40:48,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:48,366][29344] 0-true_objective: 0.0
+[2026-03-17 00:40:53,366][29344] Fps is (10 sec: 0.0, 60 sec: 2184.5, 300 sec: 2383.1). Total num frames: 524288. Throughput: 0: 2495.3. Samples: 546327. Policy #0 lag: (min: 10.0, avg: 10.0, max: 10.0)
+[2026-03-17 00:40:53,367][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:58,366][29344] Fps is (10 sec: 3276.1, 60 sec: 2730.6, 300 sec: 2475.8). Total num frames: 557056. Throughput: 0: 2224.2. Samples: 558341. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:40:58,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:40:58,368][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:03,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.6, 300 sec: 2422.0). Total num frames: 557056. Throughput: 0: 2465.7. Samples: 569207. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:03,367][29344] Avg episode reward: [(0, '0.043')]
+[2026-03-17 00:41:08,365][29344] Fps is (10 sec: 3277.2, 60 sec: 2730.7, 300 sec: 2509.9). Total num frames: 589824. Throughput: 0: 2086.8. Samples: 583605. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:08,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:08,366][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:08,367][29357] Saving experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000288_589824.pth...
+[2026-03-17 00:41:08,368][29357] Removing experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000144_294912.pth
+[2026-03-17 00:41:13,366][29344] Fps is (10 sec: 3276.8, 60 sec: 2730.7, 300 sec: 2457.6). Total num frames: 589824. Throughput: 0: 2168.4. Samples: 587279. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:13,367][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:18,366][29344] Fps is (10 sec: 3276.5, 60 sec: 2730.7, 300 sec: 2541.2). Total num frames: 622592. Throughput: 0: 2004.8. Samples: 595087. Policy #0 lag: (min: 13.0, avg: 13.0, max: 13.0)
+[2026-03-17 00:41:18,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:18,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:19,089][29357] self.policy_id=0 batch has 58.39% of invalid samples
+[2026-03-17 00:41:23,364][29344] Fps is (10 sec: 3277.4, 60 sec: 2730.7, 300 sec: 2490.4). Total num frames: 622592. Throughput: 0: 1810.4. Samples: 600915. Policy #0 lag: (min: 13.0, avg: 13.0, max: 13.0)
+[2026-03-17 00:41:23,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:25,173][29358] Updated weights for policy 0, policy_version 320 (0.0001)
+[2026-03-17 00:41:27,883][29357] self.policy_id=0 batch has 70.85% of invalid samples
+[2026-03-17 00:41:28,364][29344] Fps is (10 sec: 3277.4, 60 sec: 3276.8, 300 sec: 2570.0). Total num frames: 655360. Throughput: 0: 1891.9. Samples: 604582. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:28,364][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:28,365][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:33,366][29344] Fps is (10 sec: 3276.2, 60 sec: 2730.5, 300 sec: 2520.6). Total num frames: 655360. Throughput: 0: 1425.3. Samples: 610467. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:33,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:36,118][29357] self.policy_id=0 batch has 80.21% of invalid samples
+[2026-03-17 00:41:38,364][29344] Fps is (10 sec: 3276.7, 60 sec: 3276.8, 300 sec: 2596.7). Total num frames: 688128. Throughput: 0: 1569.5. Samples: 616953. Policy #0 lag: (min: 6.0, avg: 6.0, max: 6.0)
+[2026-03-17 00:41:38,365][29344] Avg episode reward: [(0, '0.046')]
+[2026-03-17 00:41:38,366][29344] 0-true_objective: 0.046
+[2026-03-17 00:41:43,366][29344] Fps is (10 sec: 6553.6, 60 sec: 3276.7, 300 sec: 2670.0). Total num frames: 720896. Throughput: 0: 1302.5. Samples: 616953. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:43,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:44,067][29357] self.policy_id=0 batch has 86.61% of invalid samples
+[2026-03-17 00:41:48,366][29344] Fps is (10 sec: 3276.2, 60 sec: 3276.7, 300 sec: 2621.4). Total num frames: 720896. Throughput: 0: 1158.5. Samples: 621340. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:48,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:48,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:51,861][29357] self.policy_id=0 batch has 90.75% of invalid samples
+[2026-03-17 00:41:53,365][29344] Fps is (10 sec: 3277.3, 60 sec: 3823.0, 300 sec: 2691.7). Total num frames: 753664. Throughput: 0: 905.9. Samples: 624371. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:53,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:58,362][29344] Fps is (10 sec: 6556.1, 60 sec: 3823.2, 300 sec: 2759.4). Total num frames: 786432. Throughput: 0: 824.3. Samples: 624371. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:41:58,363][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:41:58,364][29344] 0-true_objective: 0.0
+[2026-03-17 00:41:59,596][29357] self.policy_id=0 batch has 93.56% of invalid samples
+[2026-03-17 00:42:03,365][29344] Fps is (10 sec: 3276.7, 60 sec: 3823.0, 300 sec: 2711.8). Total num frames: 786432. Throughput: 0: 697.7. Samples: 626482. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:03,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:06,925][29359] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent) (1000 times)
+[2026-03-17 00:42:07,688][29357] self.policy_id=0 batch has 93.27% of invalid samples
+[2026-03-17 00:42:08,364][29344] Fps is (10 sec: 3276.1, 60 sec: 3823.0, 300 sec: 2776.9). Total num frames: 819200. Throughput: 0: 617.2. Samples: 628688. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:08,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:08,366][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:08,366][29344] 0-avg_throughput: 0.003
+[2026-03-17 00:42:13,366][29344] Fps is (10 sec: 3276.3, 60 sec: 3822.9, 300 sec: 2776.9). Total num frames: 819200. Throughput: 0: 535.7. Samples: 628688. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:13,367][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:13,759][29357] Saving new best policy, avg_throughput=0.003!
+[2026-03-17 00:42:15,627][29357] self.policy_id=0 batch has 90.13% of invalid samples
+[2026-03-17 00:42:18,366][29344] Fps is (10 sec: 3276.2, 60 sec: 3822.9, 300 sec: 2888.0). Total num frames: 851968. Throughput: 0: 476.8. Samples: 631921. Policy #0 lag: (min: 8.0, avg: 8.0, max: 8.0)
+[2026-03-17 00:42:18,367][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:18,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:18,368][29344] 0-avg_throughput: 0.003
+[2026-03-17 00:42:22,966][29360] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent) (1000 times)
+[2026-03-17 00:42:23,316][29361] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent) (1000 times)
+[2026-03-17 00:42:23,365][29344] Fps is (10 sec: 6554.5, 60 sec: 4369.0, 300 sec: 2888.0). Total num frames: 884736. Throughput: 0: 412.6. Samples: 635520. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:23,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:24,079][29357] self.policy_id=0 batch has 85.07% of invalid samples
+[2026-03-17 00:42:28,366][29344] Fps is (10 sec: 3276.8, 60 sec: 3822.8, 300 sec: 2888.0). Total num frames: 884736. Throughput: 0: 441.3. Samples: 636812. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:28,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:28,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:28,367][29344] 0-avg_throughput: 0.004
+[2026-03-17 00:42:31,617][29362] Multiple policies in trajectory buffer: [-1  0] (-1 means inactive agent) (1000 times)
+[2026-03-17 00:42:32,382][29357] self.policy_id=0 batch has 80.15% of invalid samples
+[2026-03-17 00:42:33,364][29344] Fps is (10 sec: 3277.1, 60 sec: 4369.2, 300 sec: 2999.1). Total num frames: 917504. Throughput: 0: 488.4. Samples: 643318. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:33,364][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:38,365][29344] Fps is (10 sec: 3277.2, 60 sec: 3822.9, 300 sec: 2888.0). Total num frames: 917504. Throughput: 0: 421.0. Samples: 643318. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:38,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:38,366][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:38,366][29344] 0-avg_throughput: 0.004
+[2026-03-17 00:42:40,810][29357] self.policy_id=0 batch has 77.09% of invalid samples
+[2026-03-17 00:42:43,365][29344] Fps is (10 sec: 3276.5, 60 sec: 3823.0, 300 sec: 2999.1). Total num frames: 950272. Throughput: 0: 587.9. Samples: 650826. Policy #0 lag: (min: 15.0, avg: 15.0, max: 15.0)
+[2026-03-17 00:42:43,365][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:46,879][29358] Updated weights for policy 0, policy_version 480 (0.0001)
+[2026-03-17 00:42:48,366][29344] Fps is (10 sec: 6552.7, 60 sec: 4369.1, 300 sec: 3110.2). Total num frames: 983040. Throughput: 0: 541.0. Samples: 650826. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:42:48,367][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:48,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:48,368][29344] 0-avg_throughput: 0.004
+[2026-03-17 00:42:48,368][29357] Saving new best policy, avg_throughput=0.004!
+[2026-03-17 00:42:49,459][29357] self.policy_id=0 batch has 74.24% of invalid samples
+[2026-03-17 00:42:53,371][29344] Fps is (10 sec: 3274.6, 60 sec: 3822.5, 300 sec: 2999.0). Total num frames: 983040. Throughput: 0: 679.4. Samples: 659267. Policy #0 lag: (min: 11.0, avg: 11.0, max: 11.0)
+[2026-03-17 00:42:53,372][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:58,365][29344] Fps is (10 sec: 3277.3, 60 sec: 3822.8, 300 sec: 3110.2). Total num frames: 1015808. Throughput: 0: 682.8. Samples: 659414. Policy #0 lag: (min: 6.0, avg: 6.0, max: 6.0)
+[2026-03-17 00:42:58,366][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:42:58,367][29344] 0-true_objective: 0.0
+[2026-03-17 00:42:58,367][29344] 0-avg_throughput: 0.005
+[2026-03-17 00:42:58,444][29357] self.policy_id=0 batch has 73.59% of invalid samples
+[2026-03-17 00:43:03,371][29344] Fps is (10 sec: 3276.8, 60 sec: 3822.5, 300 sec: 2999.1). Total num frames: 1015808. Throughput: 0: 799.9. Samples: 667921. Policy #0 lag: (min: 6.0, avg: 6.0, max: 6.0)
+[2026-03-17 00:43:03,372][29344] Avg episode reward: [(0, '0.000')]
+[2026-03-17 00:43:04,516][29361] Stopping RolloutWorker_w2...
+[2026-03-17 00:43:04,516][29360] Stopping RolloutWorker_w1...
+[2026-03-17 00:43:04,516][29361] Loop rollout_proc2_evt_loop terminating...
+[2026-03-17 00:43:04,516][29360] Loop rollout_proc1_evt_loop terminating...
+[2026-03-17 00:43:04,516][29362] Stopping RolloutWorker_w3...
+[2026-03-17 00:43:04,516][29344] Component RolloutWorker_w2 stopped!
+[2026-03-17 00:43:04,516][29362] Loop rollout_proc3_evt_loop terminating...
+[2026-03-17 00:43:04,516][29359] Stopping RolloutWorker_w0...
+[2026-03-17 00:43:04,516][29344] Component RolloutWorker_w1 stopped!
+[2026-03-17 00:43:04,516][29344] Component RolloutWorker_w3 stopped!
+[2026-03-17 00:43:04,516][29344] Component RolloutWorker_w0 stopped!
+[2026-03-17 00:43:04,516][29359] Loop rollout_proc0_evt_loop terminating...
+[2026-03-17 00:43:04,524][29357] Saving experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000512_1048576.pth...
+[2026-03-17 00:43:04,525][29357] Stopping Batcher_0...
+[2026-03-17 00:43:04,525][29357] Loop batcher_evt_loop terminating...
+[2026-03-17 00:43:04,527][29344] Component Batcher_0 stopped!
+[2026-03-17 00:43:04,527][29357] Removing experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000288_589824.pth
+[2026-03-17 00:43:04,527][29357] Saving experiments/train_dir/charger_appo/charger_exp/checkpoint_p0/checkpoint_000000512_1048576.pth...
+[2026-03-17 00:43:04,528][29357] Stopping LearnerWorker_p0...
+[2026-03-17 00:43:04,529][29357] Loop learner_proc0_evt_loop terminating...
+[2026-03-17 00:43:04,529][29344] Component LearnerWorker_p0 stopped!
+[2026-03-17 00:43:04,564][29358] Weights refcount: 2 0
+[2026-03-17 00:43:04,565][29358] Stopping InferenceWorker_p0-w0...
+[2026-03-17 00:43:04,565][29358] Loop inference_proc0-0_evt_loop terminating...
+[2026-03-17 00:43:04,565][29344] Component InferenceWorker_p0-w0 stopped!
+[2026-03-17 00:43:04,566][29344] Waiting for process learner_proc0 to stop...
+[2026-03-17 00:43:04,699][29344] Waiting for process inference_proc0-0 to join...
+[2026-03-17 00:43:04,703][29344] Waiting for process rollout_proc0 to join...
+[2026-03-17 00:43:04,723][29344] Waiting for process rollout_proc1 to join...
+[2026-03-17 00:43:04,723][29344] Waiting for process rollout_proc2 to join...
+[2026-03-17 00:43:04,723][29344] Waiting for process rollout_proc3 to join...
+[2026-03-17 00:43:04,723][29344] Batcher 0 profile tree view:
+batching: 0.1724, releasing_batches: 0.2774
+[2026-03-17 00:43:04,723][29344] InferenceWorker_p0-w0 profile tree view:
+wait_policy: 0.0076
+  wait_policy_total: 228.0500
+update_model: 0.0142
+  weight_update: 0.0001
+one_step: 0.0690
+  handle_policy_step: 124.6233
+    deserialize: 0.3812, stack: 0.0057, obs_to_device_normalize: 0.0340, forward: 123.8767, send_messages: 0.0317
+    prepare_outputs: 0.2330
+      to_cpu: 0.0083
+[2026-03-17 00:43:04,723][29344] Learner 0 profile tree view:
+misc: 0.0001, prepare_batch: 24.4473
+train: 194.4516
+  epoch_init: 0.0002, minibatch_init: 0.0126, losses_postprocess: 0.0172, kl_divergence: 0.0679, after_optimizer: 0.0278
+  calculate_losses: 192.2630
+    losses_init: 0.0005, forward_head: 190.1968, bptt_initial: 0.0044, bptt: 0.0042, tail: 1.8909, advantages_returns: 0.0242, losses: 0.1167
+  update: 2.0496
+    clip: 0.0724
+[2026-03-17 00:43:04,724][29344] RolloutWorker_w0 profile tree view:
+wait_for_trajectories: 0.2120, enqueue_policy_requests: 0.8967, env_step: 21.0486, overhead: 0.8265, complete_rollouts: 0.0100
+save_policy_outputs: 2.4352
+  split_output_tensors: 0.7998
+[2026-03-17 00:43:04,724][29344] RolloutWorker_w3 profile tree view:
+wait_for_trajectories: 0.2124, enqueue_policy_requests: 0.8447, env_step: 21.2818, overhead: 0.8387, complete_rollouts: 0.0100
+save_policy_outputs: 2.2473
+  split_output_tensors: 0.7579
+[2026-03-17 00:43:04,724][29344] Loop Runner_EvtLoop terminating...
+[2026-03-17 00:43:04,724][29344] Runner profile tree view:
+main_loop: 355.5511
+[2026-03-17 00:43:04,724][29344] Collected {0: 1048576}, FPS: 2949.2
