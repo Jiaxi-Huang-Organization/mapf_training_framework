@@ -23,6 +23,9 @@ def create_custom_env(cfg):
     """
     Creates a custom environment for charger_appo with battery and charger support.
     
+    Note: initial_battery is automatically set to (height + width) by pogema-charge
+    if not specified. This ensures agents have enough battery to reach anywhere.
+
     Args:
         cfg: Command line arguments with animation, num_agents, etc.
     """
@@ -30,16 +33,14 @@ def create_custom_env(cfg):
         with_animation=cfg.animation,
     )
     env_cfg.grid_config.num_agents = cfg.num_agents
+    env_cfg.grid_config.num_charges = cfg.num_charges
     env_cfg.grid_config.map_name = cfg.map_name
     env_cfg.grid_config.seed = cfg.seed
     env_cfg.grid_config.max_episode_steps = cfg.max_episode_steps
     
-    # Enable battery and charger features
-    # Note: initial_battery must be a list for pogema-charge compatibility
-    env_cfg.grid_config.initial_battery = [100] * cfg.num_agents
-    env_cfg.grid_config.battery_decrement = 1
-    env_cfg.grid_config.charge_increment = 3
-    env_cfg.grid_config.num_charges = max(1, cfg.num_agents // 4)
+    # Battery settings (initial_battery is auto-set to height+width)
+    #env_cfg.grid_config.battery_decrement = 1
+    #env_cfg.grid_config.charge_increment = 3
 
     env = create_env_base(env_cfg)
     return env
@@ -64,6 +65,8 @@ def main():
                         help='Enable animation (default: True)')
     parser.add_argument('--num_agents', type=int, default=64, 
                         help='Number of agents (default: %(default)d)')
+    parser.add_argument('--num_charges', type=int, default=32, 
+                        help='Number of charges (default: %(default)d)')
     parser.add_argument('--seed', type=int, default=0, 
                         help='Random seed (default: %(default)d)')
     parser.add_argument('--map_name', type=str, default='wfi_warehouse', 
@@ -92,7 +95,7 @@ def main():
         print("  python charger_appo_example.py --path_to_weights=model/follower")
         return
 
-    print(f"Running charger_appo evaluation with {args.num_agents} agents...")
+    print(f"Running charger_appo evaluation with {args.num_agents} agents {args.num_charges} charges ...")
     result = run_charger_appo(create_custom_env(args), args.path_to_weights)
     print(f"Result: {result}")
 

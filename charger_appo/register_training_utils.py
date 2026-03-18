@@ -24,19 +24,20 @@ def pogema_extra_episodic_stats_processing(*args, **kwargs):
 
 
 def pogema_extra_summaries(
-    runner: Runner, 
-    policy_id: PolicyID, 
-    summary_writer: SummaryWriter, 
+    runner: Runner,
+    policy_id: PolicyID,
+    summary_writer: SummaryWriter,
     env_steps: int
 ):
     """
     Log extra summaries to TensorBoard.
-    
+
     Logs metrics like:
     - Success rate
     - Path length
-    - Battery usage
+    - Battery level
     - Charger visits
+    - Reward components
     """
     policy_avg_stats = runner.policy_avg_stats
     for key in policy_avg_stats:

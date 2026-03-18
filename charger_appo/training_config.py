@@ -25,7 +25,8 @@ class DecMAPFConfig(GridConfig):
     Decentralized MAPF configuration with battery and charger support.
     
     Args:
-        initial_battery: Initial battery level for all agents (list or int)
+        initial_battery: Initial battery level for all agents (list or int).
+                        If None, automatically set to (map_height + map_width).
         battery_decrement: Battery decrement per step
         charge_increment: Battery increment when charging
         num_charges: Number of chargers on the map
@@ -44,11 +45,11 @@ class DecMAPFConfig(GridConfig):
     )
     
     # Battery and charger configuration
-    # Note: initial_battery must be a list for pogema-charge compatibility
-    initial_battery: Union[int, List[int]] = 100
+    # Note: Set to None to auto-assign based on map size (height + width)
+    initial_battery: Optional[Union[int, List[int]]] = None
     battery_decrement: int = 1
     charge_increment: int = 3
-    num_charges: int = 4  # ~1 charger per 16 agents
+    num_charges: int = 16  # ~1 charger per 4 agents
 
 
 class Environment(BaseModel):
@@ -81,15 +82,10 @@ class EnvironmentMazes(Environment):
 class PreprocessorConfigExt(PreprocessorConfig):
     """
     Extended preprocessor configuration for charger appo.
-    
-    Args:
-        charge_threshold: Battery threshold (0.0-1.0) below which agent seeks charger
-        charger_intrinsic_reward: Intrinsic reward for charger subgoals
-        use_charger_xy_input: Whether to pass nearest charger xy as input to network
+    Inherits all reward parameters from PreprocessorConfig.
     """
-    charge_threshold: float = 0.3
-    charger_intrinsic_reward: float = 0.01
-    use_charger_xy_input: bool = True
+    # Additional charger-specific preprocessing parameters can be added here
+    pass
 
 
 class EncoderConfigExt(EncoderConfig):
@@ -167,11 +163,7 @@ class Experiment(BaseModel):
     use_wandb: bool = False  # Default to False, can be enabled for production runs
     device: str = 'cpu'
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
-    
-    # Charger-specific settings
+
+    # Follower checkpoint for fine-tuning
     follower_checkpoint: Optional[str] = 'model/follower'  # Path to frozen follower weights
     freeze_follower: bool = True  # Freeze follower encoder during training
-    
-    # Battery-aware settings
-    charge_threshold: float = 0.3  # Battery threshold for charger seeking
-    charger_intrinsic_reward: float = 0.01  # Reward for charger subgoals

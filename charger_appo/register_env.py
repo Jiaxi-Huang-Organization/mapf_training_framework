@@ -15,15 +15,10 @@ from charger_appo.preprocessing import PreprocessorConfig, wrap_preprocessors
 
 def create_env(environment_cfg: Environment, preprocessing_cfg: PreprocessorConfig):
     """Create a single charger appo environment."""
-    # Handle initial_battery - convert to list if it's an int
-    # This is required for pogema-charge compatibility
-    if hasattr(environment_cfg.grid_config, 'initial_battery'):
-        initial_battery = environment_cfg.grid_config.initial_battery
-        if isinstance(initial_battery, int):
-            # Convert to list for all agents
-            num_agents = environment_cfg.grid_config.num_agents
-            environment_cfg.grid_config.initial_battery = [initial_battery] * num_agents
-    
+    # Note: initial_battery is automatically set to (height + width) by pogema-charge
+    # if set to None. This ensures agents have enough battery to reach anywhere.
+    # No manual conversion needed!
+
     env = create_env_base(environment_cfg)
     env = wrap_preprocessors(env, config=preprocessing_cfg, auto_reset=True)
     return env

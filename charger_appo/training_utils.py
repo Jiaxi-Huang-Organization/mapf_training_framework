@@ -72,10 +72,11 @@ def create_sf_config(experiment_cfg: Experiment) -> Namespace:
     
     if hasattr(final_cfg, 'freeze_follower_encoder') and final_cfg.freeze_follower_encoder:
         log.info("Follower encoder will be frozen")
-    
-    log.info(f"Charge threshold: {getattr(final_cfg, 'charge_threshold', 0.3)}")
-    log.info(f"Charger intrinsic reward: {getattr(final_cfg, 'charger_intrinsic_reward', 0.01)}")
-    
+
+    log.info(f"Intrinsic target reward: {getattr(final_cfg, 'intrinsic_target_reward', 0.01)}")
+    log.info(f"On charger reward: {getattr(final_cfg, 'on_chargers_reward', 0.02)}")
+    log.info(f"Battery reward coeff: {getattr(final_cfg, 'battery_reward_coeff', 0.01)}")
+
     return final_cfg
 
 
