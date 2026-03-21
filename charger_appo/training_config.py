@@ -144,7 +144,7 @@ class Experiment(BaseModel):
     num_batches_to_accumulate: int = 1
     normalize_input: bool = False
     decoder_mlp_layers: List[int] = Field(default_factory=list)
-    save_best_metric: str = "avg_throughput"
+    save_best_metric: str = "avg_goal_battery_relative"#"avg_throughput"
     value_bootstrap: bool = True
     save_milestones_sec: int = -1
 
@@ -152,7 +152,7 @@ class Experiment(BaseModel):
     keep_checkpoints: int = 1
     stats_avg: int = 10
     learning_rate: float = 0.000146
-    train_for_env_steps: int = 1_000_000
+    train_for_env_steps: int = 4_000_000#1_000_000
     gamma: float = 0.965
     lr_schedule: str = 'kl_adaptive_minibatch'
 
@@ -160,7 +160,7 @@ class Experiment(BaseModel):
     experiment: str = 'charger_exp'
     train_dir: str = 'experiments/train_dir/charger_appo'
     seed: Optional[int] = 42
-    use_wandb: bool = False  # Default to False, can be enabled for production runs
+    use_wandb: bool = True  # Default to False, can be enabled for production runs
     device: str = 'cpu'
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
 

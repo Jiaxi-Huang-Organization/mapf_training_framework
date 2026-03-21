@@ -63,7 +63,7 @@ def main():
     parser = argparse.ArgumentParser(description='Charger APPO Inference Script')
     parser.add_argument('--animation', action='store_false', 
                         help='Enable animation (default: True)')
-    parser.add_argument('--num_agents', type=int, default=64, 
+    parser.add_argument('--num_agents', type=int, default=128, 
                         help='Number of agents (default: %(default)d)')
     parser.add_argument('--num_charges', type=int, default=32, 
                         help='Number of charges (default: %(default)d)')

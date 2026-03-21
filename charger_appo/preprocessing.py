@@ -71,6 +71,9 @@ class ChargerWrapper(ObservationWrapper):
         self.intrinsic_reward = None
         self.position_reward = None
         self.battery_reward = None
+        self.avg_intrinsic_reward = []
+        self.avg_position_reward = []
+        self.avg_battery_reward = []
         self.battery_scale = None
         self.nearest_charger_xy = None
 
@@ -234,11 +237,12 @@ class ChargerWrapper(ObservationWrapper):
         return reward
 
     def step(self, action):
-        observation, reward, done, tr, info = self.env.step(action)        
-        # 1. 先调用 observation 更新 rewards
+        observation, reward, done, tr, info = self.env.step(action)
+        
+        # 1. Update observation and compute rewards
         observation = self.observation(observation)
 
-        # 2. 直接访问已计算的 reward 列表，创建新的 total_reward
+        # 2. Compute total reward for each agent
         total_reward = []
         for agent_idx in range(len(reward)):
             total = (
@@ -247,7 +251,24 @@ class ChargerWrapper(ObservationWrapper):
                 self.battery_reward[agent_idx]
             )
             total_reward.append(total)
-        print(f'total_reward: {total_reward}')
+        
+        # Track average rewards for episode statistics
+        if self.intrinsic_reward:
+            self.avg_intrinsic_reward.append(np.mean(self.intrinsic_reward))
+        if self.position_reward:
+            self.avg_position_reward.append(np.mean(self.position_reward))
+        if self.battery_reward:
+            self.avg_battery_reward.append(np.mean(self.battery_reward))
+        
+        # Store episode statistics only when episode ends
+        if all(done) or all(tr):
+            if info and len(info) > 0:
+                if 'episode_extra_stats' not in info[0]:
+                    info[0]['episode_extra_stats'] = {}
+                info[0]['episode_extra_stats']['avg_intrinsic_reward'] = np.mean(self.avg_intrinsic_reward) if self.avg_intrinsic_reward else 0.0
+                info[0]['episode_extra_stats']['avg_position_reward'] = np.mean(self.avg_position_reward) if self.avg_position_reward else 0.0
+                info[0]['episode_extra_stats']['avg_battery_reward'] = np.mean(self.avg_battery_reward) if self.avg_battery_reward else 0.0
+
         return observation, total_reward, done, tr, info
 
     def reset_state(self):
@@ -257,10 +278,14 @@ class ChargerWrapper(ObservationWrapper):
                 self.get_global_obstacles(),
                 self.get_global_agents_xy()
             )
+
         self.prev_goals = None
         self.intrinsic_reward = None
         self.position_reward = None
         self.battery_reward = None
+        self.avg_intrinsic_reward = []
+        self.avg_position_reward = []
+        self.avg_battery_reward = []
 
     def reset(self, **kwargs):
         observations, infos = self.env.reset(**kwargs)

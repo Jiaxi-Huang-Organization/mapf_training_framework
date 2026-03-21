@@ -9,10 +9,12 @@ from follower.preprocessing import follower_preprocessor
 from follower_cpp.inference import FollowerConfigCPP, FollowerInferenceCPP
 from follower_cpp.preprocessing import follower_cpp_preprocessor
 
-
+is_pogema_charge = False
 def create_custom_env(cfg):
     env_cfg = EnvironmentMazes(with_animation=cfg.animation)
     env_cfg.grid_config.num_agents = cfg.num_agents
+    if is_pogema_charge:
+        env_cfg.grid_config.num_charges = cfg.num_charges
     env_cfg.grid_config.map_name = cfg.map_name
     env_cfg.grid_config.seed = cfg.seed
     env_cfg.grid_config.max_episode_steps = cfg.max_episode_steps
@@ -41,6 +43,8 @@ def main():
     parser = argparse.ArgumentParser(description='Follower Inference Script')
     parser.add_argument('--animation', action='store_false', help='Enable animation (default: %(default)s)')
     parser.add_argument('--num_agents', type=int, default=128, help='Number of agents (default: %(default)d)')
+    if is_pogema_charge:
+        parser.add_argument('--num_charges', type=int, default=32, help='Number of charges (default: %(default)d)')
     parser.add_argument('--seed', type=int, default=0, help='Random seed (default: %(default)d)')
     parser.add_argument('--map_name', type=str, default='wfi_warehouse', help='Map name (default: %(default)s)')
     parser.add_argument('--max_episode_steps', type=int, default=256,
