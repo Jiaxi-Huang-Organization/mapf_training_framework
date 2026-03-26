@@ -32,11 +32,11 @@ class EncoderConfig(BaseModel):
         activation_func: Activation function ('ReLU', 'ELU', 'Mish','GeLU')
         hidden_size: Hidden size for extra FC layers
     """
-    extra_fc_layers: int = 0
+    extra_fc_layers: int = 1
     num_filters: int = 64
-    num_res_blocks: int = 1
+    num_res_blocks: int = 8
     activation_func: Literal['ReLU', 'ELU', 'Mish','GELU'] = 'GELU'
-    hidden_size: int = 128
+    hidden_size: int = 512
 
 
 def activation_func(cfg: EncoderConfig) -> nn.Module:

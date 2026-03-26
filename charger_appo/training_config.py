@@ -80,16 +80,6 @@ class EnvironmentMazes(Environment):
         map_name=r'mazes-.+'
     )
 
-class EncoderConfigExt(EncoderConfig):
-    """
-    Extended encoder configuration for charger appo.
-    
-    Args:
-        use_scalar_features: Whether to use scalar features (xy, target_xy, battery, etc.)
-        use_charger_xy_input: Whether to include charger_xy in scalar inputs
-    """
-    use_scalar_features: bool = True
-    use_charger_xy_input: bool = True
 
 
 class Experiment(BaseModel):
@@ -103,7 +93,11 @@ class Experiment(BaseModel):
     """
     # Environment
     environment: EnvironmentMazes = EnvironmentMazes()
-    encoder: EncoderConfig = EncoderConfig()
+    encoder: EncoderConfig = EncoderConfig(num_res_blocks=8,
+                                            extra_fc_layers=1,
+                                            hidden_size=512,
+                                            num_filters=64
+                                            )
     preprocessing: PreprocessorConfig = PreprocessorConfig()
 
     # Training hyperparameters
@@ -114,9 +108,9 @@ class Experiment(BaseModel):
     rnn_size: int = 256
 
     # PPO parameters
-    ppo_clip_ratio: float = 0.1
+    ppo_clip_ratio: float = 0.2
     batch_size: int = 2048
-    exploration_loss_coeff: float = 0.018
+    exploration_loss_coeff: float = 0.03
     num_envs_per_worker: int = 4
     worker_num_splits: int = 1
     max_policy_lag: int = 1
@@ -138,9 +132,9 @@ class Experiment(BaseModel):
     # Checkpointing and logging
     keep_checkpoints: int = 1
     stats_avg: int = 10
-    learning_rate: float = 0.000146
+    learning_rate: float = 0.00022
     train_for_env_steps: int = 1_000_000#1_000_000
-    gamma: float = 0.965
+    gamma: float = 0.9756
     lr_schedule: str = 'kl_adaptive_minibatch'
 
     # Experiment metadata
