@@ -8,7 +8,7 @@ Key differences from follower:
 """
 from typing import Optional, Union, List
 
-from charger_appo.model import EncoderConfig
+from charger_appo.encoder import EncoderConfig
 from charger_appo.preprocessing import PreprocessorConfig
 
 try:
@@ -37,6 +37,7 @@ class DecMAPFConfig(GridConfig):
     auto_reset: Literal[False] = False
 
     num_agents: int = 64
+    num_charges: int = 16  # ~1 charger per 4 agents
     obs_radius: int = 5
     max_episode_steps: int = 512
     map_name: str = (
@@ -49,7 +50,7 @@ class DecMAPFConfig(GridConfig):
     initial_battery: Optional[Union[int, List[int]]] = None
     battery_decrement: int = 1
     charge_increment: int = 3
-    num_charges: int = 16  # ~1 charger per 4 agents
+
 
 
 class Environment(BaseModel):
@@ -71,36 +72,22 @@ class EnvironmentMazes(Environment):
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
     use_maps: bool = True
     target_num_agents: Optional[int] = 256
-    agent_bins: Optional[list] = [128, 256, 256, 256]
+    agent_bins: Optional[list] = [64, 128, 256, 256]
+    agent_per_charge: int = 4  # Number of agents per charger
     grid_config: DecMAPFConfig = DecMAPFConfig(
         on_target='restart', 
         max_episode_steps=512,
         map_name=r'mazes-.+'
     )
 
-
-class PreprocessorConfigExt(PreprocessorConfig):
-    """
-    Extended preprocessor configuration for charger appo.
-    Inherits all reward parameters from PreprocessorConfig.
-    """
-    # Additional charger-specific preprocessing parameters can be added here
-    pass
-
-
 class EncoderConfigExt(EncoderConfig):
     """
     Extended encoder configuration for charger appo.
     
     Args:
-        follower_checkpoint: Path to pre-trained follower checkpoint.
-                            Default: 'model/follower' (relative to project root)
-        freeze_follower_encoder: Whether to freeze follower encoder parameters
         use_scalar_features: Whether to use scalar features (xy, target_xy, battery, etc.)
         use_charger_xy_input: Whether to include charger_xy in scalar inputs
     """
-    follower_checkpoint: Optional[str] = 'model/follower'
-    freeze_follower_encoder: bool = True
     use_scalar_features: bool = True
     use_charger_xy_input: bool = True
 
@@ -116,14 +103,14 @@ class Experiment(BaseModel):
     """
     # Environment
     environment: EnvironmentMazes = EnvironmentMazes()
-    encoder: EncoderConfigExt = EncoderConfigExt()
-    preprocessing: PreprocessorConfigExt = PreprocessorConfigExt()
+    encoder: EncoderConfig = EncoderConfig()
+    preprocessing: PreprocessorConfig = PreprocessorConfig()
 
     # Training hyperparameters
     rollout: int = 8
     num_workers: int = 4
     recurrence: int = 8
-    use_rnn: bool = False
+    use_rnn: bool = True
     rnn_size: int = 256
 
     # PPO parameters
@@ -152,7 +139,7 @@ class Experiment(BaseModel):
     keep_checkpoints: int = 1
     stats_avg: int = 10
     learning_rate: float = 0.000146
-    train_for_env_steps: int = 4_000_000#1_000_000
+    train_for_env_steps: int = 1_000_000#1_000_000
     gamma: float = 0.965
     lr_schedule: str = 'kl_adaptive_minibatch'
 
@@ -164,6 +151,3 @@ class Experiment(BaseModel):
     device: str = 'cpu'
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
 
-    # Follower checkpoint for fine-tuning
-    follower_checkpoint: Optional[str] = 'model/follower'  # Path to frozen follower weights
-    freeze_follower: bool = True  # Freeze follower encoder during training

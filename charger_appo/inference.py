@@ -1,210 +1,196 @@
-"""
-Charger APPO Inference
+from pogema_toolbox.algorithm_config import AlgoBase
 
-Inference utilities for the charger policy.
-Follows the same pattern as follower inference for consistency.
-"""
-from typing import Optional, List
-from argparse import Namespace
-from os.path import join
-import os
+from charger_appo.preprocessing import PreprocessorConfig
+# noinspection PyUnresolvedReferences
+from utils import fix_num_threads_issue
+
 import json
+from copy import deepcopy
 
-import torch
+from charger_appo.training_config import Experiment
+from charger_appo.register_env import register_custom_components
+
+import os
+from argparse import Namespace
+from collections import OrderedDict
+from os.path import join
+
 import numpy as np
 
+from typing import Optional
+
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
+
+import torch
 from sample_factory.utils.utils import log
+from pydantic import Extra, validator
+
 from sample_factory.algo.learning.learner import Learner
 from sample_factory.model.actor_critic import create_actor_critic
+from sample_factory.model.model_utils import get_rnn_size
 from sample_factory.algo.utils.make_env import make_env_func_batched
 from sample_factory.utils.attr_dict import AttrDict
 from sample_factory.algo.utils.rl_utils import prepare_and_normalize_obs
-from sample_factory.model.model_utils import get_rnn_size
 
-from charger_appo.register_env import register_custom_components
+# from charger_appo.algorithm_utils import AlgoBase
+
 from charger_appo.register_training_utils import register_custom_model
-from charger_appo.training_config import Experiment
 
 
-class ChargerAppoInferenceConfig:
-    """Configuration for charger appo inference."""
-    
-    def __init__(
-        self,
-        path_to_weights: str = 'model/charger_appo',
-        device: str = 'cpu',
-        override_config: Optional[dict] = None,
-        custom_path_to_weights: Optional[str] = None,
-    ):
-        self.path_to_weights = path_to_weights
-        self.device = device
-        self.override_config = override_config
-        self.custom_path_to_weights = custom_path_to_weights
-        self.training_config = None
+class ChargerAppoInferenceConfig(AlgoBase, extra=Extra.forbid):
+    """
+    A configuration class for the Proximal Policy Optimization (PPO) algorithm,
+    with additional parameters specific to the ChargerAppo agent.
+
+    Attributes:
+    -----------
+    name : Literal['ChargerAppo']
+        A string literal specifying the name of the agent.
+    path_to_weights : str
+        A string specifying the path to the weights file used by the agent.
+    planner_cfg : dict
+    batched : bool
+        A boolean indicating whether the agent should use a batched approach during training.
+    """
+    name: Literal['ChargerAppo'] = 'ChargerAppo'
+
+    path_to_weights: str = "model/charger_appo"
+    preprocessing: PreprocessorConfig = PreprocessorConfig()
+    override_config: Optional[dict] = None
+    training_config: Optional[Experiment] = None
+    custom_path_to_weights: Optional[str] = None
+
+    @classmethod
+    def recursive_dict_update(cls, original_dict, update_dict):
+        for key, value in update_dict.items():
+            if key in original_dict and isinstance(original_dict[key], dict) and isinstance(value, dict):
+                cls.recursive_dict_update(original_dict[key], value)
+            else:
+                if key not in original_dict:
+                    raise ValueError(f"Key '{key}' does not exist in the original training config.")
+                original_dict[key] = value
+
+    @validator('training_config', always=True, pre=True)
+    def load_training_config(cls, _, values, ):
+        with open(join(values['path_to_weights'], 'config.json'), "r") as f:
+            field_value = json.load(f)
+        if values.get('override_config') is not None:
+            cls.recursive_dict_update(field_value, deepcopy(values['override_config']))
+        return field_value
 
 
 class ChargerAppoInference:
     """
-    Charger APPO inference engine.
-    
-    Loads trained charger policy and provides act() interface
-    for getting actions from observations.
+
     """
-    
-    def __init__(self, cfg: ChargerAppoInferenceConfig):
-        self.algo_cfg = cfg
-        self.device = torch.device(cfg.device)
-        
-        # Register custom components
-        register_custom_components('PogemaMazes-v0')
+
+    def __init__(self, config):
+
+        self.algo_cfg: ChargerAppoInferenceConfig = config
+        device = config.device
+
         register_custom_model()
-        
-        # Load model
-        self._load_model()
-    
-    def _load_model(self):
-        """Load the charger actor-critic model."""
-        path = self.algo_cfg.path_to_weights
-        
-        # Load config.json from checkpoint directory
-        config_path = join(path, 'config.json')
-        if not os.path.exists(config_path):
-            raise FileNotFoundError(f"config.json not found in {path}")
-        
-        with open(config_path, 'r') as f:
+        self.path = config.path_to_weights
+
+        with open(join(self.path, 'config.json'), "r") as f:
             flat_config = json.load(f)
-        
-        # Apply override config if provided
-        if self.algo_cfg.override_config:
-            self._recursive_dict_update(flat_config, self.algo_cfg.override_config)
-        
-        self.exp = Experiment(**flat_config)
-        flat_config_ns = Namespace(**flat_config)
-        
-        # Set num_envs for inference
-        flat_config_ns.num_envs = 1
-        
-        # Create environment to get observation/action spaces
-        env = make_env_func_batched(
-            flat_config_ns, 
-            env_config=AttrDict(worker_index=0, vector_index=0, env_id=0)
-        )
-        
-        # Create actor-critic using sample_factory factory
-        actor_critic = create_actor_critic(
-            flat_config_ns, 
-            env.observation_space, 
-            env.action_space
-        )
+            self.exp = Experiment(**flat_config)
+            flat_config = Namespace(**flat_config)
+        env_name = self.exp.environment.env
+        register_custom_components(env_name)
+        config = flat_config
+
+        config.num_envs = 1
+
+        env = make_env_func_batched(config, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0))
+        print(env.observation_space)
+        actor_critic = create_actor_critic(config, env.observation_space, env.action_space)
         actor_critic.eval()
         env.close()
-        
-        # Move to device
-        if self.algo_cfg.device != 'cpu' and not torch.cuda.is_available():
-            os.environ['OMP_NUM_THREADS'] = '1'
-            os.environ['MKL_NUM_THREADS'] = '1'
-            self.device = torch.device('cpu')
+
+        if device != 'cpu' and not torch.cuda.is_available():
+            os.environ['OMP_NUM_THREADS'] = str(1)
+            os.environ['MKL_NUM_THREADS'] = str(1)
+            device = torch.device('cpu')
             torch.set_num_threads(1)
             torch.set_num_interop_threads(1)
             log.warning('CUDA is not available, using CPU. This might be slow.')
-        
-        actor_critic.model_to_device(self.device)
-        
-        # Load checkpoint
-        name_prefix = 'checkpoint'
-        policy_index = 0 if 'policy_index' not in flat_config else flat_config['policy_index']
-        
-        checkpoints = Learner.get_checkpoints(
-            os.path.join(path, f"checkpoint_p{policy_index}"),
-            f"{name_prefix}_*"
-        )
-        
-        # Use custom checkpoint path if provided
+
+        actor_critic.model_to_device(device)
+        name_prefix = dict(latest="checkpoint", best="best")['latest']
+        policy_index = 0 if 'policy_index' not in flat_config else flat_config.policy_index
+
+        checkpoints = Learner.get_checkpoints(os.path.join(self.path, f"checkpoint_p{policy_index}"),
+                                              f"{name_prefix}_*")
+
         if self.algo_cfg.custom_path_to_weights:
             checkpoints = [self.algo_cfg.custom_path_to_weights]
-        
-        checkpoint_dict = Learner.load_checkpoint(checkpoints, self.device)
+
+        checkpoint_dict = Learner.load_checkpoint(checkpoints, device)
         actor_critic.load_state_dict(checkpoint_dict['model'])
         log.info(f'Loaded {str(checkpoints)}')
-        
+
         self.net = actor_critic
-        self.cfg = flat_config_ns
+        self.device = device
+        self.cfg = config
+
         self.rnn_states = None
-    
-    @classmethod
-    def _recursive_dict_update(cls, original_dict: dict, update_dict: dict):
-        """Recursively update dictionary."""
-        for key, value in update_dict.items():
-            if key in original_dict and isinstance(original_dict[key], dict) and isinstance(value, dict):
-                cls._recursive_dict_update(original_dict[key], value)
-            else:
-                original_dict[key] = value
-    
-    def act(self, observations, deterministic: bool = True):
-        """
-        Get actions for observations.
-        
-        Args:
-            observations: List of observation dictionaries
-            deterministic: Whether to use deterministic actions
-            
-        Returns:
-            Array of actions
-        """
-        self.rnn_states = (
-            torch.zeros(
-                [len(observations), get_rnn_size(self.cfg)], 
-                dtype=torch.float32,
-                device=self.device
-            ) 
-            if self.rnn_states is None 
-            else self.rnn_states
-        )
-        
+
+    def act(self, observations):
+        self.rnn_states = torch.zeros([len(observations), get_rnn_size(self.cfg)], dtype=torch.float32,
+                                      device=self.device) if self.rnn_states is None else self.rnn_states
+
         obs = AttrDict(self.transform_dict_observations(observations))
-        
         with torch.no_grad():
-            policy_outputs = self.net(
-                prepare_and_normalize_obs(self.net, obs), 
-                self.rnn_states
-            )
-        
+            policy_outputs = self.net(prepare_and_normalize_obs(self.net, obs), self.rnn_states)
+
         self.rnn_states = policy_outputs['new_rnn_states']
-        
-        if deterministic:
-            actions = torch.argmax(policy_outputs['action_logits'], dim=-1)
-        else:
-            probs = torch.softmax(policy_outputs['action_logits'], dim=-1)
-            actions = torch.multinomial(probs, 1).squeeze(-1)
-        
-        return actions.cpu().numpy()
-    
+        return policy_outputs['actions'].cpu().numpy()
+
     def reset_states(self):
-        """Reset RNN states and random seed."""
-        torch.manual_seed(getattr(self.algo_cfg, 'seed', 42))
+        torch.manual_seed(self.algo_cfg.seed)
         self.rnn_states = None
-    
+
     @staticmethod
     def count_parameters(model):
-        """Count trainable parameters."""
         return sum(p.numel() for p in model.parameters() if p.requires_grad)
-    
+
     def get_model_parameters(self):
-        """Get number of trainable parameters."""
         return self.count_parameters(self.net)
-    
+
     @staticmethod
     def transform_dict_observations(observations):
         """Transform list of dict observations into a dict of lists."""
         obs_dict = dict()
-        if isinstance(observations[0], (dict,)):
+        if isinstance(observations[0], (dict, OrderedDict)):
             for key in observations[0].keys():
                 if not isinstance(observations[0][key], str):
                     obs_dict[key] = [o[key] for o in observations]
         else:
+            # handle flat observations also as dict
             obs_dict['obs'] = observations
 
         for key, x in obs_dict.items():
             obs_dict[key] = np.stack(x)
 
         return obs_dict
+
+    def to_onnx(self, filename='charger_appo.onnx'):
+        self.net.eval()
+        r = self.algo_cfg.training_config.preprocessing.network_input_radius
+        log.info(f"Saving model with network_input_radius = {r}")
+        d = 2 * r + 1
+        obs_example = torch.rand(1, 2, d, d, device=self.device)
+        rnn_example = torch.rand(1, 1, device=self.device)
+        with torch.no_grad():
+            q = self.net({'obs': obs_example}, rnn_example)
+            print(q)
+        input_names = ['obs', 'rnn_state']
+        output_names = ['values', 'action_logits', 'log_prob_actions', 'actions', 'new_rnn_states']
+
+        torch.onnx.export(self.net, ({'obs': obs_example}, rnn_example), filename,
+                          input_names=input_names, output_names=output_names,
+                          export_params=True)

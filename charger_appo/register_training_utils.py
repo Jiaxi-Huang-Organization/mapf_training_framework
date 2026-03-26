@@ -4,9 +4,7 @@ Charger APPO Training Utilities Registration
 Registers the charger encoder and actor-critic with Sample Factory.
 Also handles parameter freezing for fine-tuning.
 """
-from charger_appo.model import ResnetEncoder
-from charger_appo.actor_critic import ChargerActorCritic, create_charger_actor_critic
-
+from charger_appo.encoder import ResnetEncoder
 from sample_factory.algo.utils.context import global_model_factory
 from sample_factory.utils.typing import ObsSpace, ActionSpace
 from sample_factory.model.encoder import Encoder
@@ -73,21 +71,21 @@ def make_custom_encoder(cfg: Config, obs_space: ObsSpace) -> Encoder:
     return ResnetEncoder(cfg, obs_space)
 
 
-def make_custom_actor_critic(
-    cfg: Config,
-    obs_space: ObsSpace,
-    action_space: ActionSpace
-):
-    """
-    Factory function to create charger actor-critic.
-    
-    Note: We're now using Sample Factory's default actor-critic.
-    The custom ResnetEncoder will be used by SF's default AC.
-    This is the same approach as follower - simpler and more robust.
-    """
-    # Return None to let Sample Factory use its default ActorCritic
-    # The custom encoder will be automatically used
-    return None
+#def make_custom_actor_critic(
+#    cfg: Config,
+#    obs_space: ObsSpace,
+#    action_space: ActionSpace
+#):
+#    """
+#    Factory function to create charger actor-critic.
+#    
+#    Note: We're now using Sample Factory's default actor-critic.
+#    The custom ResnetEncoder will be used by SF's default AC.
+#    This is the same approach as follower - simpler and more robust.
+#    """
+#    # Return None to let Sample Factory use its default ActorCritic
+#    # The custom encoder will be automatically used
+#    return None
 
 
 def register_custom_model():
@@ -100,32 +98,6 @@ def register_custom_model():
     """
     global_model_factory().register_encoder_factory(make_custom_encoder)
     # Note: We don't register actor_critic factory - let SF use its default
-
-
-def freeze_encoder_params(model):
-    """
-    Freeze encoder parameters in the actor-critic model.
-    
-    This is useful for fine-tuning where you want to:
-    1. Keep the learned spatial features from follower
-    2. Only train the actor/critic heads for battery-aware behavior
-    
-    Args:
-        model: ChargerActorCritic model
-    """
-    if hasattr(model, 'encoder'):
-        for param in model.encoder.parameters():
-            param.requires_grad = False
-        model.encoder.eval()
-        log.info("Encoder parameters frozen")
-    
-    # Also freeze scalar_mlp if you want to only train actor/critic heads
-    if hasattr(model, 'scalar_mlp'):
-        for param in model.scalar_mlp.parameters():
-            param.requires_grad = False
-        model.scalar_mlp.eval()
-        log.info("Scalar MLP parameters frozen")
-
 
 def get_trainable_params(model) -> dict:
     """

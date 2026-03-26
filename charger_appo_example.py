@@ -92,7 +92,7 @@ def main():
         print("Please train a model first or specify a valid path:")
         print("  python train_charger_appo.py --train_for_env_steps=1000000")
         print("\nOr use the follower model as a starting point:")
-        print("  python charger_appo_example.py --path_to_weights=model/follower")
+        print("  python charger_appo_example.py --path_to_weights=model/charger_appo")
         return
 
     print(f"Running charger_appo evaluation with {args.num_agents} agents {args.num_charges} charges ...")

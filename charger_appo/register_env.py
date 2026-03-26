@@ -93,14 +93,17 @@ def make_env(full_env_name, cfg=None, env_config=None, render_mode=None):
     environment_config = p_config.environment
     preprocessing_config = p_config.preprocessing
 
-    if environment_config.agent_bins is not None and environment_config.target_num_agents is not None:
+    if environment_config.agent_bins is not None and environment_config.target_num_agents is not None and environment_config.agent_per_charge is not None:
         if environment_config.env_id is None:
             num_agents = environment_config.agent_bins[0]
+            num_charges = environment_config.agent_bins[0] // environment_config.agent_per_charge
         else:
             num_agents = environment_config.agent_bins[
                 environment_config.env_id % len(environment_config.agent_bins)
             ]
+            num_charges = num_agents // environment_config.agent_per_charge
         environment_config.grid_config.num_agents = num_agents
+        environment_config.grid_config.num_charges = num_charges
 
         return MultiEnv(environment_config, preprocessing_config)
     

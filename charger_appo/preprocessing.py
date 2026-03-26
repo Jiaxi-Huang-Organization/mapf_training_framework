@@ -25,14 +25,13 @@ class PreprocessorConfig(PlannerConfig):
     intrinsic_target_reward: float = 0.01
     
     # Reward component 2: Being at charger
-    on_chargers_reward: float = 0.02  # Can be higher to prioritize charging
+    on_chargers_reward: float = 0.05  # Can be higher to prioritize charging
     on_target_reward: float = 0.05
     
     # Reward component 3: Battery level (per-step)
     battery_reward_coeff: float = 0.01
-    battery_reward_max: float = 0.05
     battery_reward_type: str = 'linear'  # 'linear', 'squared', or 'threshold'
-    battery_reward_threshold: float = 0.5  # For 'threshold' reward type
+    battery_reward_threshold: float = 0.4  # For 'threshold' reward type
 
 
 def charger_appo_preprocessor(env, algo_config):
@@ -103,18 +102,6 @@ class ChargerWrapper(ObservationWrapper):
         
         return nearest_charger
 
-    def _get_battery_level(self, obs: dict) -> float:
-        """Get normalized battery level (0.0 - 1.0)."""
-        battery = obs.get('battery', self.battery_scale)
-        if isinstance(battery, (int, float)):
-            battery_val = battery
-        elif hasattr(battery, '__len__') and len(battery) > 0:
-            battery_val = battery[0]
-        
-        level = battery_val / self.battery_scale
-        assert 0.0 <= level <= 1.0
-        return level
-
     def _compute_intrinsic_reward(self, subgoal_achieved: bool) -> float:
         """Component 1: Intrinsic reward for reaching subgoals."""
         return self._cfg.intrinsic_target_reward if subgoal_achieved else 0.0
@@ -140,7 +127,7 @@ class ChargerWrapper(ObservationWrapper):
 
     def _compute_battery_reward(self, obs: dict) -> float:
         """Component 3: Battery-based per-step reward."""
-        battery_level = self._get_battery_level(obs)
+        battery_level = obs.get('battery')
         
         if self._cfg.battery_reward_type == 'linear':
             return self._cfg.battery_reward_coeff * battery_level
@@ -174,16 +161,25 @@ class ChargerWrapper(ObservationWrapper):
 
         for k, path in enumerate(paths):
             obs = observations[k]
-
+            # Preprocess obstacles
+            obs['obstacles'][obs['obstacles'] > 0] *= -1
+            # Proprocess battery(Normalize)
+            obs['battery'] = obs['battery'] / self.battery_scale
+            # Add path to observation
+            r = obs['obstacles'].shape[0] // 2
+            for idx, (gx, gy) in enumerate(path):
+                x, y = self.get_relative_xy(*obs['xy'], gx, gy, r)
+                if x is not None and y is not None:
+                    obs['obstacles'][x, y] = 1.0
+                else:
+                    break
             # Find and store nearest charger
             nearest_charger = self._find_nearest_charger(obs)
             nearest_chargers.append(nearest_charger)
 
             if path is None or len(path) < 2:
                 new_goals.append(obs['target_xy'])
-                intrinsic_rewards.append(0.0)
-                position_rewards.append(0.0)
-                battery_rewards.append(self._compute_battery_reward(obs))
+
                 path = []
             else:
                 # Check subgoal achievement
@@ -201,17 +197,6 @@ class ChargerWrapper(ObservationWrapper):
 
                 new_goals.append(path[1])
 
-            # Preprocess obstacles
-            obs['obstacles'][obs['obstacles'] > 0] *= -1
-
-            # Add path to observation
-            r = obs['obstacles'].shape[0] // 2
-            for idx, (gx, gy) in enumerate(path):
-                x, y = self.get_relative_xy(*obs['xy'], gx, gy, r)
-                if x is not None and y is not None:
-                    obs['obstacles'][x, y] = 1.0
-                else:
-                    break
         # Store state
         self.prev_goals = new_goals
         self.intrinsic_reward = intrinsic_rewards
@@ -251,7 +236,7 @@ class ChargerWrapper(ObservationWrapper):
                 self.battery_reward[agent_idx]
             )
             total_reward.append(total)
-        
+
         # Track average rewards for episode statistics
         if self.intrinsic_reward:
             self.avg_intrinsic_reward.append(np.mean(self.intrinsic_reward))
@@ -379,7 +364,6 @@ class ConcatPositionalFeatures(ObservationWrapper):
 
             if 'charges_xy' in obs:
                 del obs['charges_xy']
-
             observations[agent_idx]['obs'] = main_obs.astype(np.float32)
         return observations
 
@@ -389,9 +373,9 @@ class ConcatPositionalFeatures(ObservationWrapper):
             return '0_' + x
         elif 'agents' in x:
             return '1_' + x
-        elif x == 'charges':
-            return '2_' + x
         elif x == 'target':
+            return '2_' + x
+        elif x == 'charges':
             return '3_' + x
         elif x == 'battery':
             return '4_' + x

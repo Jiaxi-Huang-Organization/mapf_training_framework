@@ -15,9 +15,7 @@ Usage:
     python train_charger_appo.py --train_dir=experiments/train_dir/charger_appo
 
     # Fine-tune from follower checkpoint
-    python train_charger_appo.py \
-        --follower_checkpoint=model/follower \
-        --freeze_follower_encoder=True
+    python train_charger_appo.py
 
     # Adjust reward coefficients
     python train_charger_appo.py \
@@ -80,8 +78,6 @@ def main():
     print("\n" + "="*60)
     print("Charger APPO Training Configuration")
     print("="*60)
-    print(f"Follower checkpoint: {experiment.get('follower_checkpoint', 'None')}")
-    print(f"Freeze follower encoder: {experiment.get('freeze_follower_encoder', True)}")
     print(f"Train dir: {experiment.get('train_dir', 'experiments/train_dir/charger_appo')}")
     print(f"Train steps: {experiment.get('train_for_env_steps', 1_000_000)}")
     print(f"\nReward Configuration:")
