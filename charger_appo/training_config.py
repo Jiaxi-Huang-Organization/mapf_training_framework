@@ -93,10 +93,10 @@ class Experiment(BaseModel):
     """
     # Environment
     environment: EnvironmentMazes = EnvironmentMazes()
-    encoder: EncoderConfig = EncoderConfig(num_res_blocks=8,
+    encoder: EncoderConfig = EncoderConfig(num_res_blocks=4,
                                             extra_fc_layers=1,
-                                            hidden_size=512,
-                                            num_filters=64
+                                            hidden_size=256,
+                                            num_filters=32
                                             )
     preprocessing: PreprocessorConfig = PreprocessorConfig()
 
@@ -104,7 +104,7 @@ class Experiment(BaseModel):
     rollout: int = 8
     num_workers: int = 4
     recurrence: int = 8
-    use_rnn: bool = True
+    use_rnn: bool = False
     rnn_size: int = 256
 
     # PPO parameters
@@ -125,7 +125,7 @@ class Experiment(BaseModel):
     num_batches_to_accumulate: int = 1
     normalize_input: bool = False
     decoder_mlp_layers: List[int] = Field(default_factory=list)
-    save_best_metric: str = "avg_goal_battery_relative"#"avg_throughput"
+    save_best_metric: str = "avg_throughput"#"avg_goal_battery_relative"
     value_bootstrap: bool = True
     save_milestones_sec: int = -1
 

@@ -30,11 +30,12 @@ class PlannerConfig(BaseModel):
 class Planner:
     """Path planner for multi-agent navigation."""
     
-    def __init__(self, cfg: PlannerConfig):
+    def __init__(self, cfg: PlannerConfig, planner_type: str):
         self.planner = None
         self.obstacles = None
         self.starts = None
         self.cfg = cfg
+        self.type = planner_type
 
     def add_grid_obstacles(self, obstacles, starts):
         """Set global obstacles and agent start positions."""
@@ -70,18 +71,32 @@ class Planner:
                 penalties = pen_calc.precompute_penalty_matrix(obs_radius)
                 for p in self.planner:
                     p.set_penalties(penalties)
-
-        for k in range(num_agents):
-            if obs[k]['xy'] == obs[k]['target_xy']:
-                continue
-            obs[k]['agents'][obs_radius][obs_radius] = 0
-            self.planner[k].update_occupations(
-                obs[k]['agents'], 
-                (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), 
-                obs[k]['target_xy']
-            )
-            obs[k]['agents'][obs_radius][obs_radius] = 1
-            self.planner[k].update_path(obs[k]['xy'], obs[k]['target_xy'])
+        if self.type == 'target':
+            for k in range(num_agents):
+                if obs[k]['xy'] == obs[k]['target_xy']:
+                    continue
+                obs[k]['agents'][obs_radius][obs_radius] = 0
+                self.planner[k].update_occupations(
+                    obs[k]['agents'], 
+                    (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), 
+                    obs[k]['target_xy']
+                )
+                obs[k]['agents'][obs_radius][obs_radius] = 1
+                self.planner[k].update_path(obs[k]['xy'], obs[k]['target_xy'])
+        elif self.type == 'charger':
+            for k in range(num_agents):
+                if obs[k]['xy'] == obs[k]['charge_xy']:
+                    continue
+                obs[k]['agents'][obs_radius][obs_radius] = 0
+                self.planner[k].update_occupations(
+                    obs[k]['agents'], 
+                    (obs[k]['xy'][0] - obs_radius, obs[k]['xy'][1] - obs_radius), 
+                    obs[k]['charge_xy']
+                )
+                obs[k]['agents'][obs_radius][obs_radius] = 1
+                self.planner[k].update_path(obs[k]['xy'], obs[k]['charge_xy'])
+        else:
+            raise ValueError(f"Unknown planner type: {self.type}")
 
     def get_path(self):
         """Get planned paths for all agents."""
@@ -94,8 +109,9 @@ class Planner:
 class ResettablePlanner:
     """Wrapper for planner that supports resetting."""
     
-    def __init__(self, cfg: PlannerConfig):
+    def __init__(self, cfg: PlannerConfig, planner_type: Literal['target', 'charger']):
         self._cfg = cfg
+        self._type = planner_type
         self._agent = None
 
     def update(self, observations):
@@ -108,4 +124,4 @@ class ResettablePlanner:
 
     def reset_states(self):
         """Reset the internal planner."""
-        self._agent = Planner(self._cfg)
+        self._agent = Planner(self._cfg, self._type)
