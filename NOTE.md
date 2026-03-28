@@ -1,0 +1,2 @@
+- 当前env中agent数量默认为agent_bins[0],num_env为target_num_agents/agent_bins[0]
+- follower在pogema训练出来的模型，虽然在charge环境能infer，但是要做特殊处理，不然性能对比不公平

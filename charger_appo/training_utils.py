@@ -132,13 +132,7 @@ def run(config=None):
 
     flat_config, runner = make_runner(create_sf_config(exp))
     register_msg_handlers(flat_config, runner)
-    
-    # Log model summary after initialization
-    if hasattr(runner, 'algo') and hasattr(runner.algo, 'actor_critic'):
-        model = runner.algo.actor_critic
-        log_model_summary(model)
-        
-                
+                        
     status = runner.init()
     if status == ExperimentStatus.SUCCESS:
         status = runner.run()

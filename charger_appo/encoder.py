@@ -35,7 +35,7 @@ class EncoderConfig(BaseModel):
     extra_fc_layers: int = 1
     num_filters: int = 64
     num_res_blocks: int = 8
-    activation_func: Literal['ReLU', 'ELU', 'Mish','GELU'] = 'GELU'
+    activation_func: Literal['ReLU', 'ELU', 'Mish','GELU'] = 'ReLU'
     hidden_size: int = 512
 
 

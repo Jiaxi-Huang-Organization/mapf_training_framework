@@ -20,8 +20,8 @@ def run_episode(env, algo):
         # 添加监控代码
         step_count += 1
         dead_count = sum(1 for info in infos if not info.get('is_active', True))
-        print(f"Step {step_count}: Dead agents = {dead_count}/{len(infos)}")
         if all(dones) or all(tr):
+            print(f"Step {step_count}: Dead agents = {dead_count}/{len(infos)}")
             break
     return results_holder.get_final()
 

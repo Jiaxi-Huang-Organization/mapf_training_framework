@@ -150,7 +150,13 @@ class ConcatPositionalFeatures(ObservationWrapper):
         obs_shape = (len(self.to_concat), full_size, full_size)
         observation_space['obs'] = Box(0.0, 1.0, shape=obs_shape)
         self.to_concat.sort(key=self.key_comparator)
-        self.observation_space = observation_space
+        
+        keys_to_remove = ['charges_xy', 'battery']
+        observation_space_copy = Dict({
+            key: space for key, space in observation_space.items()
+            if key not in keys_to_remove
+        })
+        self.observation_space = observation_space_copy
 
     def observation(self, observations):
         for agent_idx, obs in enumerate(observations):
