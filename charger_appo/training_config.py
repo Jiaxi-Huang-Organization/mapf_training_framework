@@ -75,9 +75,10 @@ class EnvironmentMazes(Environment):
     agent_bins: Optional[list] = [128, 256, 256, 256]
     agent_per_charge: int = 4  # Number of agents per charger
     grid_config: DecMAPFConfig = DecMAPFConfig(
-        on_target='restart', 
+        on_target='restart',
+        on_battery_death='training',
         max_episode_steps=512,
-        map_name=r'mazes-.+'
+        map_name=r'mazes-.+|random-.+'
     )
 
 
@@ -93,10 +94,10 @@ class Experiment(BaseModel):
     """
     # Environment
     environment: EnvironmentMazes = EnvironmentMazes()
-    encoder: EncoderConfig = EncoderConfig(num_res_blocks=1,
-                                            extra_fc_layers=0,
-                                            hidden_size=64,
-                                            num_filters=16
+    encoder: EncoderConfig = EncoderConfig(num_res_blocks=4,
+                                            extra_fc_layers=1,
+                                            hidden_size=128,
+                                            num_filters=32
                                             )
     preprocessing: PreprocessorConfig = PreprocessorConfig()
 
@@ -104,8 +105,8 @@ class Experiment(BaseModel):
     rollout: int = 8
     num_workers: int = 4
     recurrence: int = 8
-    use_rnn: bool = False
-    rnn_size: int = 256
+    use_rnn: bool = True
+    rnn_size: int = 128
 
     # PPO parameters
     ppo_clip_ratio: float = 0.2
@@ -133,15 +134,15 @@ class Experiment(BaseModel):
     keep_checkpoints: int = 1
     stats_avg: int = 10
     learning_rate: float = 0.00022
-    train_for_env_steps: int = 10_000_000#1_000_000
+    train_for_env_steps: int = 200000000#1_000_000
     gamma: float = 0.9756
     lr_schedule: str = 'kl_adaptive_minibatch'
 
     # Experiment metadata
-    experiment: str = 'charger_appo(0328)_2_local'
+    experiment: str = 'full(0423_new_infra)'
     train_dir: str = 'experiments/train_dir/charger_appo'
     seed: Optional[int] = 42
-    use_wandb: bool = False  # Default to False, can be enabled for production runs
-    device: str = 'cpu'
+    use_wandb: bool = True  # Default to False, can be enabled for production runs
+    device: str = 'cuda'
     env: Literal['PogemaMazes-v0'] = "PogemaMazes-v0"
 

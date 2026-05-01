@@ -57,7 +57,7 @@ class ChargerAppoInferenceConfig(AlgoBase, extra=Extra.forbid):
     """
     name: Literal['ChargerAppo'] = 'ChargerAppo'
 
-    path_to_weights: str = "model/charger_appo"
+    path_to_weights: str = "model/full(0416)"
     preprocessing: PreprocessorConfig = PreprocessorConfig()
     override_config: Optional[dict] = None
     training_config: Optional[Experiment] = None

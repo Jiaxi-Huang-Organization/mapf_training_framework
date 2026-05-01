@@ -16,13 +16,6 @@ To execute the algorithm and produce an animation using pre-trained weights, use
 ```bash
 python3 example.py
 ```
-```bash
-python3 example.py --map_name wfi_warehouse --num_agents 128
-python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-appo
-python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-iql
-python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-mappo
-python3 example.py --map_name pico_s00_od20_na32 --num_agents 32 --algorithm charger-qmix
-```
 
 
 ## Training:

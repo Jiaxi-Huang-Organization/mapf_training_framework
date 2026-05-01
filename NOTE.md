@@ -1,2 +1,3 @@
 - 当前env中agent数量默认为agent_bins[0],num_env为target_num_agents/agent_bins[0]
 - follower在pogema训练出来的模型，虽然在charge环境能infer，但是要做特殊处理，不然性能对比不公平
+- 有一个问题，在执行eval.py的时候，环境会按照里面environment的设置开启，但是注意对num_charges和agent_per_charge的处理设置，是否scenario都考虑

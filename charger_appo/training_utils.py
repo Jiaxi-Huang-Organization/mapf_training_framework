@@ -54,10 +54,6 @@ def create_sf_config(experiment_cfg: Experiment) -> Namespace:
     register_custom_components(experiment_cfg.environment.env)
     register_custom_model()
             
-    log.info(f"Intrinsic target reward: {getattr(final_cfg, 'intrinsic_target_reward', 0.01)}")
-    log.info(f"On charger reward: {getattr(final_cfg, 'on_chargers_reward', 0.02)}")
-    log.info(f"Battery reward coeff: {getattr(final_cfg, 'battery_reward_coeff', 0.01)}")
-
     return final_cfg
 
 

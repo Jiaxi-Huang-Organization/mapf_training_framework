@@ -106,6 +106,7 @@ class FollowerInference:
         config.num_envs = 1
 
         env = make_env_func_batched(config, env_config=AttrDict(worker_index=0, vector_index=0, env_id=0))
+        print(env.observation_space)
         actor_critic = create_actor_critic(config, env.observation_space, env.action_space)
         actor_critic.eval()
         env.close()

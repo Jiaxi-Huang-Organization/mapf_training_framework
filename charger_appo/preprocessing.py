@@ -28,15 +28,15 @@ class PreprocessorConfig(PlannerConfig):
     on_target_reward: float = 0.03
 
     # Reward component 3: Battery level (per-step)
-    battery_reward_coeff: float = 0.02
-    battery_reward_type: str = 'threshold'  # 'linear', 'squared', or 'threshold'
+    battery_reward_coeff: float = 0.015
+    battery_reward_type: str = 'linear'  # 'linear', 'squared', or 'threshold'
     battery_reward_threshold: float = 0.4  # For 'threshold' reward type
     
     # Charging behavior configuration
-    min_charge_level: float = 0.9  # Minimum battery level after charging before leaving
+    min_charge_level: float = 0.8  # Minimum battery level after charging before leaving
 
     # Early death penalty
-    early_death_penalty_coeff: float = 0.2  # Coefficient for early death penalty
+    early_death_penalty_coeff: float = 0.05  # Coefficient for early death penalty
 
 
 def charger_appo_preprocessor(env, algo_config):
@@ -90,7 +90,7 @@ class ChargerWrapper(ObservationWrapper):
 
     def _find_nearest_charger(self, obs: dict) -> tuple:
         """Find the nearest charger from agent's current position."""
-        charges_xy = obs.get('charges_xy', [])
+        charges_xy = obs.get('charges_xy')
         if not charges_xy:
             return None
         
@@ -156,7 +156,6 @@ class ChargerWrapper(ObservationWrapper):
         intrinsic_rewards = []
         position_rewards = []
         battery_rewards = []
-        charging_penalties = []
         nearest_chargers = []
         true_paths = []
         
@@ -167,7 +166,15 @@ class ChargerWrapper(ObservationWrapper):
             # Find and store nearest charger
             nearest_charger = self._find_nearest_charger(observations[agent_idx])
             observations[agent_idx]['charge_xy'] = nearest_charger
-            
+            # add charger into obs
+            r = obs['obstacles'].shape[0] // 2
+            for cx, cy in obs.get('charges_xy'):
+                x, y = self.get_relative_xy(*obs['xy'], cx, cy, r)
+                if x is not None and y is not None:
+                    if obs['obstacles'][x, y] == 0:  # 仅标记空位置
+                        obs['obstacles'][x, y] = 1.0
+                    else:
+                        raise ValueError("Error! Charge Station and Obstacles in same position!")
         # Update charger planner
         self.ch_plan.update(observations)
         charge_paths = self.ch_plan.get_path()
@@ -187,7 +194,6 @@ class ChargerWrapper(ObservationWrapper):
             else:
                 self.is_charging[agent_idx] = False
                 self.charge_start_battery[agent_idx] = 0.0
-                charging_penalties.append(0.0)
             
             # Decide which path to use
             # If charging, stay until battery reaches min_charge_level
@@ -234,8 +240,24 @@ class ChargerWrapper(ObservationWrapper):
                     battery_rewards.append(self._compute_battery_reward(obs))
                 elif battery_level <= self._cfg.battery_reward_threshold:
                     new_goals.append(obs['charge_xy'])
+                    # Component 1: Intrinsic reward (reached charger subgoal)
+                    subgoal_achieved = self.prev_goals and obs['xy'] == self.prev_goals[k]
+                    intrinsic_rewards.append(self._compute_intrinsic_reward(subgoal_achieved))
+                    # Component 2: Position reward
+                    reached_goal = (obs['xy'] == obs['charge_xy'])
+                    position_rewards.append(self._compute_position_reward(obs, reached_goal))
+                    # Component 3: Battery reward
+                    battery_rewards.append(self._compute_battery_reward(obs))
                 else:
                     new_goals.append(obs['target_xy'])
+                    # Component 1: Intrinsic reward (reached target subgoal)
+                    subgoal_achieved = self.prev_goals and obs['xy'] == self.prev_goals[k]
+                    intrinsic_rewards.append(self._compute_intrinsic_reward(subgoal_achieved))
+                    # Component 2: Position reward
+                    reached_goal = (obs['xy'] == obs['target_xy'])
+                    position_rewards.append(self._compute_position_reward(obs, reached_goal))
+                    # Component 3: Battery reward
+                    battery_rewards.append(self._compute_battery_reward(obs))
 
                 path = []
             else:
@@ -292,10 +314,8 @@ class ChargerWrapper(ObservationWrapper):
         for agent_idx in range(len(reward)):
             # Compute early death penalty if agent died early
             early_death_penalty = 0.0
-            if done[agent_idx] or tr[agent_idx]:
-                episode_progress = self.current_length / self.max_episode_length
-                # Penalty is higher when episode ends earlier
-                early_death_penalty = -self._cfg.early_death_penalty_coeff * (1.0 - episode_progress)
+            if tr[agent_idx]:
+                early_death_penalty = -self._cfg.early_death_penalty_coeff
 
             early_death_penalties.append(early_death_penalty)
             total = (

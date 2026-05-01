@@ -1,4 +1,5 @@
-from pogema_toolbox.create_env import create_env_base, Environment
+from create_env import create_env_base
+from pogema_toolbox.create_env import Environment
 from pogema_toolbox.evaluator import evaluation
 from pogema import BatchAStarAgent
 
@@ -21,7 +22,7 @@ BASE_PATH = Path('experiments')
 
 
 def main(disable_wandb=False):
-    ToolboxRegistry.register_env('Pogema-v0', create_env_base, Environment)
+    ToolboxRegistry.register_env('Environment', create_env_base, Environment)
     #ToolboxRegistry.register_algorithm('A*', BatchAStarAgent)
     ToolboxRegistry.register_algorithm('Follower', FollowerInference, FollowerInferenceConfig,
                                        follower_preprocessor)
@@ -32,25 +33,25 @@ def main(disable_wandb=False):
 
 
     folder_names = [
-        '01-random-20x20',
+        #'01-random-20x20',
         #'02-mazes',
         #'03-dense',
         #'04-Paris_1',
         #'04-movingai',
         #'05-puzzles',
-        #'06-warehouse',
+        '06-warehouse',
     ]
     for folder in folder_names:
         map_path = BASE_PATH / folder / "maps.yaml"
         with open(map_path, 'r') as f:
             maps_to_register = yaml.safe_load(f)
         ToolboxRegistry.register_maps(maps_to_register)        
-        config_path = BASE_PATH / folder / f"{Path(folder).name}.yaml"
+        config_path = BASE_PATH / folder / f"{Path(folder).name}_charger.yaml"
         eval_dir = BASE_PATH / folder
 
         with open(config_path) as f:
             evaluation_config = yaml.safe_load(f)
-            
+
         evaluation(evaluation_config, eval_dir=eval_dir)
 
 
